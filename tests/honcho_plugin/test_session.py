@@ -788,8 +788,13 @@ class TestTrivialPromptHeuristic:
         return provider
 
     def test_classifier_catches_common_trivial_forms(self):
-        for t in ("ok", "OK", " ok ", "y", "yes", "sure", "thanks", "lgtm", "/help", "", "   "):
+        for t in ("ok", "OK", " ok ", "y", "yes", "sure", "thanks", "/help", "", "   "):
             assert HonchoMemoryProvider._is_trivial_prompt(t), f"expected trivial: {t!r}"
+
+    def test_classifier_passes_workflow_commands(self):
+        """Mid-task workflow words need memory context, so they must not skip."""
+        for t in ("continue", "next", "do it", "proceed", "go ahead", "done", "lgtm"):
+            assert not HonchoMemoryProvider._is_trivial_prompt(t), f"expected non-trivial: {t!r}"
 
     def test_classifier_catches_greetings(self):
         """Greeting words must register as trivial so context injection is skipped."""

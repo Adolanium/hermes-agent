@@ -1147,8 +1147,17 @@ class TestTrivialPromptClassifier:
         from agent.memory_provider import is_trivial_prompt
 
         for t in ("hi", "HI!", "hey.", "hello", "yo", "sup~", "thanks :)",
-                  "done???", "ok", "yes.", "k", "", "   ", "/help", "lgtm"):
+                  "ok", "yes.", "k", "got it", "", "   ", "/help"):
             assert is_trivial_prompt(t), f"expected trivial: {t!r}"
+
+    def test_workflow_commands_are_not_trivial(self):
+        from agent.memory_provider import is_trivial_prompt
+
+        # Mid-task workflow commands need provider memory, so they must NOT
+        # be gated out as trivial even though they are short.
+        for t in ("continue", "next", "do it", "proceed", "go ahead",
+                  "done", "done???", "lgtm"):
+            assert not is_trivial_prompt(t), f"expected non-trivial: {t!r}"
 
     def test_substantive_and_prefix_collisions_pass_through(self):
         from agent.memory_provider import is_trivial_prompt

@@ -48,11 +48,16 @@ logger = logging.getLogger(__name__)
 # The alternation is anchored and may only be followed by whitespace or
 # punctuation, so words that merely START with a trivial word ("k8s", "yolo",
 # "note", "hindsight") do NOT match, while trailing-punctuation variants
-# ("hi!", "hey.", "thanks :)", "done???") do.
+# ("hi!", "hey.", "thanks :)") do.
+#
+# Workflow commands ("continue", "next", "do it", "proceed", "go ahead",
+# "done", "lgtm") are deliberately NOT here: they are common mid-task turns
+# where the agent is about to do more work and provider memory is exactly
+# what it needs. Only pure acknowledgements and greetings skip prefetch.
 TRIVIAL_PROMPT_RE = re.compile(
     r'^(yes|no|ok|okay|sure|thanks|thank you|y|n|yep|nope|yeah|nah|'
     r'hi|hey|hello|yo|sup|'
-    r'continue|go ahead|do it|proceed|got it|cool|nice|great|done|next|lgtm|k)'
+    r'got it|cool|nice|great|k)'
     r'[\s!?.:;,"' + "'" + r'~\u2018\u2019\u201c\u201d\u2014\u2013\u2026()\[\]{}<>*&^%$#@!+=`\u00a0]*$',
     re.IGNORECASE,
 )
