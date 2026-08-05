@@ -431,10 +431,44 @@ def _is_stale_tool_call_marker_message(msg: Dict[str, Any]) -> bool:
     return bool(_STALE_TOOL_CALL_MARKER_RE.fullmatch(content.strip()))
 
 
+def _is_bare_marker_final_reply(msg: Dict[str, Any]) -> bool:
+    """True when ``msg`` is an assistant FINAL reply whose entire content is
+    a bare bracketed marker (e.g. ``[memory]``) with no ``tool_calls``.
+
+    This is the second half of the #78148 contamination: the loop cached the
+    stray marker from a tool-call turn and, when the following turn came
+    back empty, replayed it as the "final response". Persisted that way it
+    has no ``tool_calls``, so the per-message signature above never matches
+    it, yet it teaches the model the marker on every resume just the same.
+    Callers must only act on this when an earlier marker+tool_calls turn
+    exists in the same conversation — that pairing is what separates the
+    replayed fallback from a deliberate one-word answer.
+    """
+    if not isinstance(msg, dict):
+        return False
+    if msg.get("role") != "assistant":
+        return False
+    if msg.get("tool_calls"):
+        return False
+    content = msg.get("content")
+    if not isinstance(content, str):
+        return False
+    return bool(_STALE_TOOL_CALL_MARKER_RE.fullmatch(content.strip()))
+
+
 def _strip_stale_tool_call_markers(
     messages: List[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
     """Clear bare protocol-marker content persisted before the #78148 fix.
+
+    Two shapes are repaired:
+
+    1. Marker content sitting alongside a real ``tool_calls`` payload.
+    2. A later FINAL assistant reply that is nothing but the same bare
+       marker with no ``tool_calls`` — the cached fallback replayed as the
+       answer on the next turn. Only cleared when an earlier
+       marker+tool_calls turn exists in this conversation, so a genuine
+       one-word reply is never touched.
 
     Replaying "[memory]" as if the model had actually answered teaches the
     model, by example, to keep emitting the same marker in later turns — the
@@ -444,8 +478,13 @@ def _strip_stale_tool_call_markers(
     rows pass through unchanged.
     """
     repaired = 0
+    seen_marker_tool_turn = False
     for msg in messages:
         if _is_stale_tool_call_marker_message(msg):
+            msg["content"] = ""
+            seen_marker_tool_turn = True
+            repaired += 1
+        elif seen_marker_tool_turn and _is_bare_marker_final_reply(msg):
             msg["content"] = ""
             repaired += 1
     if repaired:
@@ -8578,6 +8617,12 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
         left in the ``messages`` table by sessions persisted before the
         #78148 fix in ``agent.conversation_loop``.
 
+        Both contamination shapes are covered: marker content sitting next
+        to a real ``tool_calls`` payload, and a later bare-marker FINAL
+        reply (no ``tool_calls``) that the loop persisted when it replayed
+        the cached marker as the answer. The final-reply shape only counts
+        when a marker+tool_calls turn precedes it in the same session.
+
         ``_strip_stale_tool_call_markers`` already repairs this in memory on
         every session load (see ``_rows_to_conversation``), so running this
         is optional — but for long-lived sessions the same rows get
@@ -8607,14 +8652,31 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
         """
 
         def _find_affected(conn) -> List[int]:
+            # Single ordered scan catches both contamination shapes in one
+            # pass: a marker+tool_calls row, and a LATER bare-marker final
+            # reply in the same session (the cached fallback replayed as the
+            # answer, persisted without tool_calls). Ordering matters because
+            # the final-reply shape is only contamination when a marker
+            # tool-call turn precedes it, and because this same UPDATE blanks
+            # the marker+tool_calls content that future scans use as the
+            # evidence.
             cursor = conn.execute(
-                "SELECT id, content FROM messages "
-                "WHERE role = 'assistant' AND tool_calls IS NOT NULL AND tool_calls != ''"
+                "SELECT id, session_id, content, tool_calls FROM messages "
+                "WHERE role = 'assistant' ORDER BY session_id, id"
             )
             affected: List[int] = []
+            sessions_with_marker_turn: set = set()
             for row in cursor.fetchall():
                 content = row["content"]
-                if isinstance(content, str) and _STALE_TOOL_CALL_MARKER_RE.fullmatch(content.strip()):
+                if not (
+                    isinstance(content, str)
+                    and _STALE_TOOL_CALL_MARKER_RE.fullmatch(content.strip())
+                ):
+                    continue
+                if row["tool_calls"]:
+                    sessions_with_marker_turn.add(row["session_id"])
+                    affected.append(row["id"])
+                elif row["session_id"] in sessions_with_marker_turn:
                     affected.append(row["id"])
             return affected
 

@@ -84,6 +84,68 @@ class TestStripStaleToolCallMarkers:
         assert out == messages
 
 
+class TestStripBareMarkerFinalReplies:
+    """The replayed-fallback shape: a bare marker persisted as a FINAL
+    assistant reply (no tool_calls) on the turn after a marker+tool_calls
+    turn. Cleared only when that earlier marker turn exists."""
+
+    def test_clears_final_reply_marker_after_marker_tool_turn(self):
+        messages = [
+            {"role": "user", "content": "do the full task"},
+            {
+                "role": "assistant",
+                "content": "[memory]",
+                "tool_calls": [{"id": "1", "function": {"name": "skill_manage", "arguments": "{}"}}],
+            },
+            {"role": "tool", "content": "ok", "tool_call_id": "1"},
+            # Next turn came back empty, cached marker replayed as the answer.
+            {"role": "assistant", "content": "[memory]"},
+        ]
+        out = _strip_stale_tool_call_markers(messages)
+        assert out[1]["content"] == ""
+        assert out[3]["content"] == ""
+
+    def test_final_reply_marker_without_prior_marker_turn_is_kept(self):
+        # No marker+tool_calls turn anywhere: a bare "[memory]" final reply
+        # is not the contamination signature, leave it alone.
+        messages = [
+            {"role": "user", "content": "what did you just do?"},
+            {"role": "assistant", "content": "[memory]"},
+        ]
+        out = _strip_stale_tool_call_markers(messages)
+        assert out[1]["content"] == "[memory]"
+
+    def test_final_reply_marker_before_marker_turn_is_kept(self):
+        # Ordering matters: only a replay AFTER a marker tool turn counts.
+        messages = [
+            {"role": "assistant", "content": "[memory]"},
+            {
+                "role": "assistant",
+                "content": "[memory]",
+                "tool_calls": [{"id": "1", "function": {"name": "skill_manage", "arguments": "{}"}}],
+            },
+        ]
+        out = _strip_stale_tool_call_markers(messages)
+        assert out[0]["content"] == "[memory]"
+        assert out[1]["content"] == ""
+
+    def test_marker_sentence_final_reply_is_kept(self):
+        # Real user-facing content that merely mentions the marker must
+        # survive even in a contaminated session (fullmatch, not substring).
+        messages = [
+            {
+                "role": "assistant",
+                "content": "[memory]",
+                "tool_calls": [{"id": "1", "function": {"name": "skill_manage", "arguments": "{}"}}],
+            },
+            {"role": "tool", "content": "ok", "tool_call_id": "1"},
+            {"role": "assistant", "content": "[memory] is not configured"},
+        ]
+        out = _strip_stale_tool_call_markers(messages)
+        assert out[0]["content"] == ""
+        assert out[2]["content"] == "[memory] is not configured"
+
+
 class TestGetMessagesAsConversationStripsStaleMarkers:
     """The load-on-read wiring: get_messages_as_conversation must actually
     call _strip_stale_tool_call_markers, so a session polluted with a stale
@@ -258,5 +320,112 @@ class TestPurgeStaleToolCallMarkers:
                 report = db.purge_stale_tool_call_markers(dry_run=False)
                 assert report["rows_affected"] == 0
                 assert report["row_ids"] == []
+            finally:
+                db.close()
+
+
+class TestBareMarkerFinalReplyEndToEnd:
+    """Load-on-read and purge coverage for the replayed-fallback shape: the
+    bare "[memory]" FINAL reply (no tool_calls) persisted on the turn after
+    a marker+tool_calls turn."""
+
+    def _seed_replayed_fallback_db(self, db):
+        db.create_session(session_id="s1", source="cli")
+        db.append_message("s1", role="user", content="do the full task")
+        db.append_message(
+            "s1", role="assistant", content="[memory]",
+            tool_calls=[{"id": "1", "function": {"name": "skill_manage", "arguments": "{}"}}],
+        )
+        db.append_message("s1", role="tool", content="ok", tool_call_id="1")
+        # Next turn came back empty, cached marker replayed as the answer.
+        db.append_message("s1", role="assistant", content="[memory]")
+
+    def test_resume_clears_both_marker_shapes(self):
+        import tempfile
+        from pathlib import Path
+        from hermes_state import SessionDB
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db = SessionDB(db_path=Path(tmp) / "t.db")
+            try:
+                self._seed_replayed_fallback_db(db)
+
+                conv = db.get_messages_as_conversation("s1")
+                contents = [m.get("content") for m in conv if m.get("role") == "assistant"]
+
+                assert "[memory]" not in contents
+            finally:
+                db.close()
+
+    def test_purge_clears_both_marker_shapes_in_one_run(self):
+        import tempfile
+        from pathlib import Path
+        from hermes_state import SessionDB
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db = SessionDB(db_path=Path(tmp) / "t.db")
+            try:
+                self._seed_replayed_fallback_db(db)
+
+                report = db.purge_stale_tool_call_markers(dry_run=False)
+                assert report["rows_affected"] == 2
+
+                rows = db._conn.execute(
+                    "SELECT content FROM messages WHERE role = 'assistant'"
+                ).fetchall()
+                assert [r["content"] for r in rows] == ["", ""]
+
+                # Idempotent: a second run must find nothing, including via
+                # the now-blanked marker+tool_calls evidence row.
+                second = db.purge_stale_tool_call_markers(dry_run=False)
+                assert second["rows_affected"] == 0
+            finally:
+                db.close()
+
+    def test_purge_keeps_final_reply_marker_without_prior_marker_turn(self):
+        import tempfile
+        from pathlib import Path
+        from hermes_state import SessionDB
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db = SessionDB(db_path=Path(tmp) / "t.db")
+            try:
+                db.create_session(session_id="s1", source="cli")
+                db.append_message("s1", role="user", content="what did you just do?")
+                db.append_message("s1", role="assistant", content="[memory]")
+
+                report = db.purge_stale_tool_call_markers(dry_run=False)
+                assert report["rows_affected"] == 0
+
+                row = db._conn.execute(
+                    "SELECT content FROM messages WHERE role = 'assistant'"
+                ).fetchone()
+                assert row["content"] == "[memory]"
+            finally:
+                db.close()
+
+    def test_purge_scopes_final_reply_detection_per_session(self):
+        # A marker tool turn in one session must not condemn a deliberate
+        # one-word reply in another.
+        import tempfile
+        from pathlib import Path
+        from hermes_state import SessionDB
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db = SessionDB(db_path=Path(tmp) / "t.db")
+            try:
+                self._seed_replayed_fallback_db(db)
+                db.create_session(session_id="s2", source="cli")
+                db.append_message("s2", role="user", content="what did you just do?")
+                db.append_message("s2", role="assistant", content="[memory]")
+
+                report = db.purge_stale_tool_call_markers(dry_run=False)
+                assert report["rows_affected"] == 2
+
+                row = db._conn.execute(
+                    "SELECT content FROM messages WHERE session_id = 's2' "
+                    "AND role = 'assistant'"
+                ).fetchone()
+                assert row["content"] == "[memory]"
             finally:
                 db.close()
