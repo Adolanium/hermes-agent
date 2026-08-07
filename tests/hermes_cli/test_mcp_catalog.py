@@ -636,3 +636,70 @@ class TestShippedCatalog:
                     )
 
         assert not problems, "unpinned catalog entries:\n" + "\n".join(problems)
+
+
+# ---------------------------------------------------------------------------
+# _run_bootstrap: no shell
+# ---------------------------------------------------------------------------
+
+
+class TestRunBootstrap:
+    """Bootstrap commands must run as argv, never through a shell."""
+
+    def test_bootstrap_passes_argv_list_without_shell(self, tmp_path, monkeypatch):
+        import hermes_cli.mcp_catalog as mc
+
+        calls = []
+
+        def _fake_run(args, **kwargs):
+            calls.append((args, kwargs))
+
+            class _Proc:
+                returncode = 0
+
+            return _Proc()
+
+        monkeypatch.setattr("hermes_cli.mcp_catalog.subprocess.run", _fake_run)
+        mc._run_bootstrap(tmp_path, ["npm install", "npm run build"])
+
+        assert [args for args, _ in calls] == [
+            ["npm", "install"],
+            ["npm", "run", "build"],
+        ]
+        for _, kwargs in calls:
+            assert kwargs.get("shell") is not True
+            assert kwargs.get("cwd") == str(tmp_path)
+
+    def test_bootstrap_metacharacters_stay_literal(self, tmp_path, monkeypatch):
+        """A catalog entry with shell metacharacters must not execute them."""
+        import hermes_cli.mcp_catalog as mc
+
+        captured = []
+
+        def _fake_run(args, **kwargs):
+            captured.append(args)
+
+            class _Proc:
+                returncode = 0
+
+            return _Proc()
+
+        monkeypatch.setattr("hermes_cli.mcp_catalog.subprocess.run", _fake_run)
+        payload = f"echo hi > {tmp_path / 'pwned'}"
+        mc._run_bootstrap(tmp_path, [payload])
+
+        # No shell, so the redirection operator is a literal argv element.
+        assert ">" in captured[0]
+        assert not (tmp_path / "pwned").exists()
+
+    def test_bootstrap_failure_raises_with_command(self, tmp_path, monkeypatch):
+        import hermes_cli.mcp_catalog as mc
+
+        class _Proc:
+            returncode = 3
+
+        monkeypatch.setattr(
+            "hermes_cli.mcp_catalog.subprocess.run", lambda *a, **k: _Proc()
+        )
+        with pytest.raises(mc.CatalogError, match="npm install"):
+            mc._run_bootstrap(tmp_path, ["npm install"])
