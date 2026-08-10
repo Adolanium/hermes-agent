@@ -367,6 +367,11 @@ _WRAPPER_PATH_BYPASS = [
     "env --unset=FOO rm -rf /",
     "sudo -u root reboot",
     "sudo -u root rm -rf /",
+    # Operand-taking flags whose operand is case-distinct from a no-operand
+    # sibling: `sudo -h host` (lowercase) vs `sudo -H` (uppercase, no operand).
+    # Matching options case-insensitively would drop one side of this pair.
+    "sudo -h host reboot",
+    "sudo --host host reboot",
     "doas reboot",
     "doas -u root rm -rf /",
     # A path to the WRAPPER executable (not just to the verb) must be consumed
@@ -444,6 +449,20 @@ _WRAPPER_PREFIX_NOT_A_HARDLINE = [
     "usr/bin/grep reboot file",
     "usr/local/bin/my-reboot-log --tail",
     "git log origin/reboot-branch",
+    # No-operand wrapper flags must never swallow the real program as their
+    # "operand" and re-anchor its arguments as a command. These all blocked
+    # when the anchor regex treated every wrapper option as maybe-consuming an
+    # operand. `sudo -H` is a no-operand flag (set HOME) while `sudo -h` takes
+    # a host operand, so option matching has to be case-sensitive.
+    "env -i echo reboot",
+    "sudo -n echo reboot",
+    "doas -n echo reboot",
+    "timeout --foreground echo reboot",
+    "env -i echo rm -rf /",
+    "nice -n echo reboot",
+    "sudo -E echo rm -rf /",
+    "sudo -H echo reboot",
+    "timeout --preserve-status echo reboot",
 ]
 
 

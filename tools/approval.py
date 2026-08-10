@@ -356,45 +356,20 @@ _WRITE_TARGET_BOUNDARY = r'(?=[\s;&|<>"\']|$)'
 # Inspired by Mercury Agent's permission-hardened blocklist
 # (https://github.com/cosmicstack-labs/mercury-agent).
 
-# Command-position-anchored destructive verbs (the ones _CMDPOS guards). A
-# wrapper flag may consume its own operand, but never one of these: the operand
-# lookahead below stops so the verb still anchors as a command.
-_HARDLINE_VERBS = r'(?:rm|shutdown|reboot|halt|poweroff|init|systemctl|telinit)\b'
-
-# Leading wrapper commands that run their argument as a new command, so a
-# destructive verb sitting after the whole prefix is still that verb at command
-# position. sudo, env, and doas are wrappers too and are handled by the same
-# argument grammar as the rest: a narrower "env assignments only" / "sudo flags
-# only" special case left `env -i reboot`, `env --unset=FOO rm -rf /`, and
-# `sudo -u root reboot` outside the floor because their options (and the option
-# operands) were not consumed before the verb.
-_WRAPPER_WORD = (
-    r'(?:sudo|doas|env|exec|nohup|setsid|time|nice|ionice|stdbuf|timeout'
-    r'|command|builtin)'
-)
-
-# One wrapper argument: a flag optionally followed by a single operand that is
-# not itself a destructive verb (`-u root`, `-s KILL`, `--unset=FOO`), a bare
-# numeric/duration positional (`timeout 5`, `nice -n 10`), or a NAME=VALUE
-# assignment (`env FOO=1`). The operand lookahead never eats a destructive
-# command word, so the verb after the wrapper still anchors and an option
-# operand cannot be mistaken for the command.
-_WRAPPER_ARG = (
-    r'(?:\s+-\S+(?:\s+(?!' + _HARDLINE_VERBS + r')[^\s-]\S*)?'
-    r'|\s+\d+\S*'
-    r'|\s+\w+=\S*)'
-)
-
 # Regex fragment matching the *start* of a command (i.e. positions where a
 # shell would begin parsing a new command). Used by shutdown/reboot patterns so
 # they don't fire on "echo reboot" or "grep 'shutdown' log". Matches: start of
 # string, after command separators (; && || | newline), after subshell openers
-# (`$(` or backtick), optionally consuming leading wrapper commands with their
-# options/operands/assignments and an absolute/relative path to the binary.
-# Optional path to an executable, applied before both the leading wrappers and
-# the destructive verb, so a path-qualified wrapper (`/usr/bin/nice reboot`,
-# `./env -i reboot`) is consumed the same way as a path-qualified verb
-# (`/bin/reboot`) and cannot move the verb off anchor.
+# (`$(` or backtick), and an optional absolute/relative path to the binary.
+# Leading wrapper commands (`sudo`, `env`, `timeout`, ...) are handled by
+# `_strip_wrapper_prefixes` instead of this anchor: a regex cannot know which
+# option takes an operand, so `sudo -n reboot` and `sudo -u root reboot` came
+# out identical and every no-operand flag re-anchored its own operand as the
+# command.
+#
+# Optional path to an executable, applied before the destructive verb, so a
+# path-qualified verb (`/bin/reboot`, `./rm -rf /`) cannot move itself off
+# anchor.
 #
 # Any slash-containing path resolves to the same executable, so the prefix must
 # accept every spelling that names a binary: absolute (`/usr/bin/`), dot-relative
@@ -409,8 +384,6 @@ _OPTIONAL_PATH_PREFIX = r'(?:/?(?:[^\s/]+/)*)?'
 _CMDPOS = (
     r'(?:^|[;&|\n`]|\$\()'                          # start position
     r'\s*'                                          # optional whitespace
-    r'(?:' + _OPTIONAL_PATH_PREFIX + _WRAPPER_WORD + _WRAPPER_ARG + r'*\s+)*'  # leading (path-qualified) wrappers + args
-    r'\s*'
     + _OPTIONAL_PATH_PREFIX                         # optional path to the verb (/bin/, ./)
 )
 
@@ -1399,6 +1372,113 @@ def _mark_command_starts(command: str) -> str:
     return out
 
 
+
+
+# Leading exec wrappers (`sudo`, `env`, `timeout`, ...) push the real program
+# off the command-start anchor the hardline patterns use. Which option takes
+# an operand is data here, not regex, so a no-operand flag (`sudo -n`,
+# `timeout --foreground`) can never swallow the program and re-anchor its
+# arguments as a command.
+_WRAPPER_WORDS = frozenset({
+    "sudo", "doas", "env", "exec", "nohup", "setsid", "time",
+    "command", "builtin", "nice", "ionice", "stdbuf", "timeout",
+})
+_WRAPPER_STR_OPERAND = {
+    "sudo": {"-u", "-g", "-h", "-p", "-U", "-D", "-R", "-T",
+             "--user", "--group", "--host", "--prompt", "--chdir",
+             "--role", "--type"},
+    "doas": {"-u"},
+    "env": {"-u", "-C", "-a", "-S",
+            "--unset", "--chdir", "--argv0", "--split-string"},
+    "exec": {"-a"},
+    "ionice": {"-c", "-p", "--class", "--pid"},
+    "stdbuf": {"-i", "-o", "-e", "--input", "--output", "--error"},
+    "timeout": {"-s", "-k", "--signal", "--kill-after"},
+}
+_WRAPPER_NUM_OPERAND = {
+    "sudo": {"-C", "--close-from"},
+    "nice": {"-n", "--adjustment"},
+    "ionice": {"-n", "--classdata"},
+}
+_WRAPPER_DURATION_RE = re.compile(r"\d+(?:\.\d+)?[A-Za-z]*")
+
+
+def _wrapper_prefix_end(command: str, start: int) -> int:
+    """Offset where the real program after any leading wrappers begins."""
+    pos = start
+    seen_wrapper = False
+    while True:
+        ws, we, word = _read_shell_word(command, pos)
+        if ws == we:
+            return start  # prefix with no program: nothing executes
+        base = word.rsplit("/", 1)[-1].lower()
+        if base not in _WRAPPER_WORDS:
+            return ws if seen_wrapper else start
+        seen_wrapper = True
+        pos = we
+        while True:  # this wrapper's options / assignments / leading positional
+            ows, owe, oword = _read_shell_word(command, pos)
+            if ows == owe:
+                pos = owe
+                break
+            # Option matching is case-sensitive (`sudo -H` is a no-operand
+            # flag, `sudo -h host` takes an operand).
+            if oword == "--":
+                pos = owe
+                break
+            if oword.startswith("-") and oword != "-":
+                if "=" in oword:
+                    pos = owe  # --opt=value carries its own operand
+                    continue
+                str_opts = _WRAPPER_STR_OPERAND.get(base, ())
+                num_opts = _WRAPPER_NUM_OPERAND.get(base, ())
+                kind = None
+                if oword in str_opts:
+                    kind = "str"
+                elif oword in num_opts:
+                    kind = "num"
+                elif re.fullmatch(r"-[a-zA-Z]+", oword):
+                    # short bundle: the last letter owns the operand
+                    if ("-" + oword[-1]) in str_opts:
+                        kind = "str"
+                    elif ("-" + oword[-1]) in num_opts:
+                        kind = "num"
+                if kind is None:
+                    pos = owe  # no-operand flag
+                    continue
+                vws, vwe, value = _read_shell_word(command, owe)
+                if vws == vwe:
+                    pos = owe
+                    continue
+                if kind == "num" and not _WRAPPER_DURATION_RE.fullmatch(value):
+                    return start  # invalid operand: the wrapper errors here
+                pos = vwe
+                continue
+            if base == "env" and _ENV_ASSIGNMENT_RE.fullmatch(oword):
+                pos = owe
+                continue
+            if base == "timeout" and _WRAPPER_DURATION_RE.fullmatch(oword):
+                pos = owe  # leading duration positional
+                continue
+            break  # the real program: the outer loop re-reads it
+
+
+def _strip_wrapper_prefixes(command: str) -> str:
+    """Blank every leading wrapper chain so the real verb sits at the anchor."""
+    cuts = []
+    for start in _iter_shell_command_starts(command):
+        end = _wrapper_prefix_end(command, start)
+        if end > start:
+            cuts.append((start, end))
+    if not cuts:
+        return command
+    out = command
+    for s, e in reversed(cuts):
+        out = out[:s] + " " + out[e:]
+    return out
+
+
+
 def _iter_shell_command_word_spans(command: str):
     """Yield command-position words that may be executable names."""
     for command_start in _iter_shell_command_starts(command):
@@ -1460,6 +1540,14 @@ def _command_detection_variants(command: str):
     if marked != normalized and marked not in seen:
         seen.add(marked)
         yield marked
+    # Leading exec wrappers (`sudo -u root reboot`, `env -i rm -rf /`) push the
+    # real verb off the command anchor. Strip them into a variant so the
+    # anchored patterns see the verb itself.
+    for base_variant in (normalized, marked):
+        stripped = _strip_wrapper_prefixes(base_variant)
+        if stripped not in seen:
+            seen.add(stripped)
+            yield stripped
     # Shell quoting/escaping can spell a dangerous executable name in pieces
     # (for example r\m or r''m). Keep that deobfuscation scoped to command
     # words so similarly shaped arguments do not become false positives.
