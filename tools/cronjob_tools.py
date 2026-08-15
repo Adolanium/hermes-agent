@@ -1138,6 +1138,7 @@ def cronjob(
     monitor_url: Optional[str] = None,
     task_id: str = None,
     session_id: Optional[str] = None,
+    allow_background: bool = True,
 ) -> str:
     """Unified cron job management tool."""
     del task_id  # unused but kept for handler signature compatibility
@@ -1338,9 +1339,17 @@ def cronjob(
             # batches of manual runs (#80xxx — the "stuck Telegram session"
             # incident). Falls back to inline execution when the session
             # runtime can't receive detached completions.
-            bg = _try_dispatch_background_run(
-                job, session_id=session_id, extra_prompt=extra_prompt
-            )
+            #
+            # One-shot `hermes cron run` passes allow_background=False. That
+            # process exits as soon as the command returns, so a detached
+            # runner thread dies mid-job and leaves the fire claim hanging
+            # (#86721). Stay on the inline path even if a leftover
+            # HERMES_SESSION_KEY is in the environment.
+            bg = None
+            if allow_background:
+                bg = _try_dispatch_background_run(
+                    job, session_id=session_id, extra_prompt=extra_prompt
+                )
             if bg is not None and bg.get("dispatched"):
                 _notify_provider_jobs_changed_safe()
                 result = _format_job(get_job(job_id) or {"id": job_id})

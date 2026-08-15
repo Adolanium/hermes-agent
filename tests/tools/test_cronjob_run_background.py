@@ -167,6 +167,36 @@ class TestBackgroundDispatch:
 
 
 class TestSyncFallbacks:
+    def test_allow_background_false_stays_inline_even_with_session_key(self):
+        """One-shot `hermes cron run` must wait, even if HERMES_SESSION_KEY is set.
+
+        A leftover Desktop or gateway env would otherwise claim the job, start
+        a background thread, then exit and kill the runner (#86721).
+        """
+        claimed = {**_job("job-bg-cli-wait"), "fire_claim": {"by": "cli-owner"}}
+        with _bound_session_key():
+            with patch("tools.cronjob_tools.resolve_job_ref", return_value=_job("job-bg-cli-wait")), \
+                 patch("tools.cronjob_tools.claim_job_for_fire", return_value=claimed), \
+                 patch("tools.async_delegation.dispatch_async_delegation") as m_disp, \
+                 patch("cron.scheduler.run_one_job", return_value=True) as m_run, \
+                 patch("tools.cronjob_tools.get_job",
+                       return_value={"last_status": "ok", "last_error": None}):
+                out = json.loads(
+                    cronjob(
+                        action="run",
+                        job_id="job-bg-cli-wait",
+                        allow_background=False,
+                    )
+                )
+
+        assert out["success"] is True
+        assert out["job"]["executed"] is True
+        assert out["job"]["execution_success"] is True
+        assert out["job"].get("execution_mode") != "background"
+        assert out["job"].get("delegation_id") is None
+        m_disp.assert_not_called()
+        m_run.assert_called_once()
+
     def test_no_session_key_falls_back_to_sync(self):
         """Direct Python callers (no agent session) keep the sync path."""
         res = _try_dispatch_background_run(_job('job-bg-05'))

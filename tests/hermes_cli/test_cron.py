@@ -357,3 +357,33 @@ class TestCronRunBackgroundDispatch:
         assert rc == 0
         assert "Running in background (delegation del-xyz)." in out
         assert "failed" not in out.lower()
+
+    def test_oneshot_run_forces_inline_and_reaps_dead_claims(self, monkeypatch, capsys):
+        """`hermes cron run` must wait in this process (#86721)."""
+        seen = {}
+        recovered = {"called": False}
+
+        def fake_api(**kwargs):
+            seen.update(kwargs)
+            return {
+                "success": True,
+                "job": {
+                    "id": "job-1",
+                    "name": "Watchdog",
+                    "executed": True,
+                    "execution_success": True,
+                },
+            }
+
+        monkeypatch.setattr(cron_cli, "_cron_api", fake_api)
+        monkeypatch.setattr(
+            "cron.executions.recover_interrupted_executions",
+            lambda: recovered.__setitem__("called", True) or 0,
+        )
+
+        rc, out = self._run_cmd(capsys)
+
+        assert rc == 0
+        assert seen.get("allow_background") is False
+        assert recovered["called"] is True
+        assert "Ran now: succeeded." in out

@@ -462,7 +462,18 @@ def cron_edit(args):
 
 
 def _job_action(action: str, job_id: str, success_verb: str) -> int:
-    result = _cron_api(action=action, job_id=job_id)
+    extra = {}
+    if action == "run":
+        # This process is one-shot. Detaching the job into a background
+        # thread would kill the runner on exit (#86721). Force inline run.
+        extra["allow_background"] = False
+        try:
+            from cron.executions import recover_interrupted_executions
+
+            recover_interrupted_executions()
+        except Exception:
+            pass
+    result = _cron_api(action=action, job_id=job_id, **extra)
     if not result.get("success"):
         print(color(f"Failed to {action} job: {result.get('error', 'unknown error')}", Colors.RED))
         return 1
