@@ -60,7 +60,7 @@ Remote-creation notes:
 
 Every Bot gets a face:
 
-- **Geometric faces** — 7 shapes × 10 colors, with blinking eyes that scan while the Bot works.
+- **Geometric faces** — 7 shapes × 10 colors, with eyes that blink, look around, and change with the Bot's state: a message you have not read makes it happy, a working Bot turns and thinks, a hidden Bot looks shy, and a Bot whose gateway is down looks unwell.
 - **An uploaded image** — any picture you like.
 - **An AI-generated portrait** — when an image backend is configured, generated in place (this rides the standard `image.generate` RPC and works over both local and remote gateways).
 - **A pixel pet** — a companion from the [petdex gallery](./features/pets.md) that bounces beside the avatar while the Bot is busy. Run `hermes pets` in a terminal to explore the gallery.
