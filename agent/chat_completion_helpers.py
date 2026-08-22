@@ -3886,6 +3886,11 @@ def interruptible_streaming_api_call(agent, api_kwargs: dict, *, on_first_delta=
         _conn_cap = min(_base_timeout, 60.0) if _provider_timeout_cfg is not None else 30.0
         content_parts: list = []
         tool_calls_acc: dict = {}
+        # Argument chunks per slot, kept as a list and joined only when
+        # something reads them. Adding to the string on the accumulator dict
+        # instead would copy the whole argument blob on every chunk, so a
+        # large write_file call would cost the square of its own size.
+        tool_call_arg_parts: dict = {}  # slot -> list of argument chunks
         tool_gen_notified: set = set()
         # Ollama-compatible endpoints reuse index 0 for every tool call
         # in a parallel batch, distinguishing them only by id.  Track
@@ -3969,7 +3974,21 @@ def interruptible_streaming_api_call(agent, api_kwargs: dict, *, on_first_delta=
             last_chunk_time["t"] = time.time()
             return True
 
+        def _materialize_tool_call_arguments() -> None:
+            """Write the collected argument chunks into the accumulator dicts.
+
+            Called wherever the arguments are about to be read. Always writes
+            the whole joined value rather than adding to what is there, so
+            calling it more than once is safe and chunks that arrive later
+            still end up in the right place.
+            """
+            for slot, parts in tool_call_arg_parts.items():
+                tc = tool_calls_acc.get(slot)
+                if tc is not None:
+                    tc["function"]["arguments"] = "".join(parts)
+
         def _relay_final_response() -> dict[str, Any]:
+            _materialize_tool_call_arguments()
             tool_calls = [tool_calls_acc[index] for index in sorted(tool_calls_acc)]
             return {
                 "model": model_name,
@@ -4234,7 +4253,9 @@ def interruptible_streaming_api_call(agent, api_kwargs: dict, *, on_first_delta=
                             entry["function"]["name"] = function_name
                         function_arguments = getattr(tc_function, "arguments", None)
                         if function_arguments:
-                            entry["function"]["arguments"] += function_arguments
+                            tool_call_arg_parts.setdefault(idx, []).append(
+                                function_arguments
+                            )
                     extra = getattr(tc_delta, "extra_content", None)
                     if extra is None and hasattr(tc_delta, "model_extra"):
                         extra = (tc_delta.model_extra if isinstance(tc_delta.model_extra, dict) else {}).get("extra_content")
@@ -4313,6 +4334,7 @@ def interruptible_streaming_api_call(agent, api_kwargs: dict, *, on_first_delta=
         mock_tool_calls = None
         has_truncated_tool_args = False
         if tool_calls_acc:
+            _materialize_tool_call_arguments()
             mock_tool_calls = []
             for idx in sorted(tool_calls_acc):
                 tc = tool_calls_acc[idx]
