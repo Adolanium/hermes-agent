@@ -2169,6 +2169,17 @@ def _fs_regular_file(path: Path) -> tuple[Path, os.stat_result]:
     return target, st
 
 
+def _fs_openable_file(raw_path: str) -> tuple[Path, os.stat_result]:
+    """Resolve a regular file for /api/fs read/download, blocking credential files."""
+    target, st = _fs_regular_file(_fs_path(raw_path))
+    if _is_sensitive_path(target):
+        raise HTTPException(
+            status_code=403,
+            detail="Access to sensitive files is not allowed",
+        )
+    return target, st
+
+
 def _fs_find_git_root(start: Path) -> str | None:
     directory = start
     for _ in range(50):
@@ -2883,7 +2894,7 @@ async def fs_list(path: str):
 
 @app.get("/api/fs/read-text")
 async def fs_read_text(path: str):
-    target, st = _fs_regular_file(_fs_path(path))
+    target, st = _fs_openable_file(path)
     if st.st_size > _FS_TEXT_SOURCE_MAX_BYTES:
         raise HTTPException(status_code=413, detail="File too large")
     bytes_to_read = min(st.st_size, _FS_TEXT_PREVIEW_MAX_BYTES)
@@ -2954,7 +2965,7 @@ async def fs_write_text(payload: FsWriteText):
 
 @app.get("/api/fs/read-data-url")
 async def fs_read_data_url(path: str):
-    target, st = _fs_regular_file(_fs_path(path))
+    target, st = _fs_openable_file(path)
     if st.st_size > _FS_DATA_URL_MAX_BYTES:
         raise HTTPException(status_code=413, detail="File too large")
     try:
@@ -2968,9 +2979,7 @@ async def fs_read_data_url(path: str):
 
 @app.get("/api/fs/download")
 async def fs_download(path: str):
-    target, _st = _fs_regular_file(_fs_path(path))
-    if _is_sensitive_path(target):
-        raise HTTPException(status_code=403, detail="Access to sensitive files is not allowed")
+    target, _st = _fs_openable_file(path)
     return FileResponse(
         path=str(target),
         media_type=_fs_mime_type(target),

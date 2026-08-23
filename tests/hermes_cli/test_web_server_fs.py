@@ -77,6 +77,32 @@ def test_fs_download_rejects_sensitive_files(client, tmp_path):
     assert response.status_code == 403
 
 
+@pytest.mark.parametrize("route", ["/api/fs/read-text", "/api/fs/read-data-url", "/api/fs/download"])
+@pytest.mark.parametrize(
+    "relpath",
+    [".env", ".env.local", "config.yaml", "mcp-tokens/server.json", "pairing/code.json"],
+)
+def test_fs_read_routes_reject_sensitive_files(client, tmp_path, route, relpath):
+    target = tmp_path / relpath
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("SECRET=1")
+
+    response = client.get(route, params={"path": str(target)})
+
+    assert response.status_code == 403
+    assert "SECRET" not in response.text
+
+
+def test_fs_read_text_returns_plain_file(client, tmp_path):
+    target = tmp_path / "notes.txt"
+    target.write_text("hello")
+
+    response = client.get("/api/fs/read-text", params={"path": str(target)})
+
+    assert response.status_code == 200
+    assert response.json()["text"] == "hello"
+
+
 def test_fs_endpoints_require_auth(tmp_path):
     client = TestClient(web_server.app)
     target = tmp_path / "secret.txt"
