@@ -47,8 +47,9 @@ _TOPIC_TABLES = (
 
 # These values describe derived indexes or the schema that owns an optional
 # table. A fresh destination must generate them from its own current schema.
+_FTS_STORAGE_META_KEY = "fts_storage_version"
 _GENERATED_META_KEYS = frozenset({
-    "fts_storage_version",
+    _FTS_STORAGE_META_KEY,
     "fts_optimize_available",
     "fts_rebuild_high_water",
     "fts_rebuild_progress",
@@ -57,6 +58,41 @@ _GENERATED_META_KEYS = frozenset({
     "fts_cjk_rebuild_progress",
     "telegram_dm_topic_schema_version",
 })
+
+# The ``fts_`` namespace in state_meta is internal lifecycle state. Recovery
+# owns brand-new projections, so source values in that namespace are never
+# authoritative for the destination. Finalization clears the namespace only
+# after fresh FTS projection parity succeeds. The prefix also covers dynamic
+# teardown cursors and future FTS markers that are not enumerated above.
+_GENERATED_META_KEY_PREFIXES = ("fts_",)
+if not all(
+    isinstance(prefix, str) and prefix for prefix in _GENERATED_META_KEY_PREFIXES
+):
+    raise ValueError("generated metadata prefixes must be non-empty strings")
+
+
+def _is_generated_meta_key(key: Any) -> bool:
+    value = str(key)
+    return value in _GENERATED_META_KEYS or value.startswith(
+        _GENERATED_META_KEY_PREFIXES
+    )
+
+
+def _generated_meta_prefix_sql(
+    column: str, *, include: bool
+) -> tuple[str, tuple[Any, ...]]:
+    """Build a parameterized prefix predicate from the canonical namespace."""
+    if not _GENERATED_META_KEY_PREFIXES:
+        return ("0", ()) if include else ("1", ())
+    operator = "=" if include else "<>"
+    joiner = " OR " if include else " AND "
+    clauses: list[str] = []
+    params: list[Any] = []
+    for prefix in _GENERATED_META_KEY_PREFIXES:
+        clauses.append(f"SUBSTR({column}, 1, ?) {operator} ?")
+        params.extend((len(prefix), prefix))
+    return f"({joiner.join(clauses)})", tuple(params)
+
 
 _SIDECAR_SUFFIXES = ("", "-wal", "-shm", "-journal")
 _MINIMUM_SPACE_HEADROOM = 256 * 1024 * 1024
@@ -805,8 +841,10 @@ def _copy_state_meta(
     result: dict[str, Any] = {
         "source_meta_rows": source_rows,
         "copied_rows": 0,
+        "excluded_rows": 0,
         "columns": ["key", "value"],
         "excluded_keys": sorted(_GENERATED_META_KEYS),
+        "excluded_prefixes": list(_GENERATED_META_KEY_PREFIXES),
     }
     if not {"key", "value"}.issubset(source_columns):
         result["status"] = "missing"
@@ -816,23 +854,31 @@ def _copy_state_meta(
         result["error"] = "destination state_meta schema is incomplete"
         return result
 
-    placeholders = ", ".join("?" for _ in _GENERATED_META_KEYS)
+    generated_keys = tuple(sorted(_GENERATED_META_KEYS))
+    placeholders = ", ".join("?" for _ in generated_keys)
+    prefix_predicate, prefix_params = _generated_meta_prefix_sql(
+        "key", include=False
+    )
+    copy_predicate = f"key NOT IN ({placeholders}) AND {prefix_predicate}"
+    copy_params = (*generated_keys, *prefix_params)
     filtered_source_rows: Optional[int] = None
     try:
         filtered_source_rows = int(
             source.execute(
-                f"SELECT COUNT(*) FROM state_meta WHERE key NOT IN ({placeholders})",
-                tuple(_GENERATED_META_KEYS),
+                f"SELECT COUNT(*) FROM state_meta WHERE {copy_predicate}",
+                copy_params,
             ).fetchone()[0]
         )
     except sqlite3.DatabaseError:
         # The copy loop below will return the concrete read error.
         pass
+    if source_rows is not None and filtered_source_rows is not None:
+        result["excluded_rows"] = max(0, source_rows - filtered_source_rows)
 
     try:
         cursor = source.execute(
-            f"SELECT key, value FROM state_meta WHERE key NOT IN ({placeholders})",
-            tuple(_GENERATED_META_KEYS),
+            f"SELECT key, value FROM state_meta WHERE {copy_predicate}",
+            copy_params,
         )
         while True:
             rows = cursor.fetchmany(chunk_size)
@@ -907,6 +953,7 @@ def _copy_state_meta_salvage(
             "copied_rows": 0,
             "columns": ["key", "value"],
             "excluded_keys": sorted(_GENERATED_META_KEYS),
+            "excluded_prefixes": list(_GENERATED_META_KEY_PREFIXES),
             "status": "missing",
         }
     if not {"key", "value"}.issubset(source_columns):
@@ -917,6 +964,7 @@ def _copy_state_meta_salvage(
             "copied_rows": 0,
             "columns": ["key", "value"],
             "excluded_keys": sorted(_GENERATED_META_KEYS),
+            "excluded_prefixes": list(_GENERATED_META_KEY_PREFIXES),
             "status": "failed",
             "error": (
                 "source state_meta exists but is missing the key/value "
@@ -930,6 +978,7 @@ def _copy_state_meta_salvage(
             "copied_rows": 0,
             "columns": ["key", "value"],
             "excluded_keys": sorted(_GENERATED_META_KEYS),
+            "excluded_prefixes": list(_GENERATED_META_KEY_PREFIXES),
             "status": "failed",
             "error": "destination state_meta schema is incomplete",
         }
@@ -938,7 +987,7 @@ def _copy_state_meta_salvage(
         row: tuple[Any, ...],
         columns: tuple[str, ...],
     ) -> bool:
-        return str(row[columns.index("key")]) not in _GENERATED_META_KEYS
+        return not _is_generated_meta_key(row[columns.index("key")])
 
     result = _copy_table_salvage(
         source,
@@ -952,6 +1001,7 @@ def _copy_state_meta_salvage(
     )
     result["source_meta_rows"] = result.pop("source_rows")
     result["excluded_keys"] = sorted(_GENERATED_META_KEYS)
+    result["excluded_prefixes"] = list(_GENERATED_META_KEY_PREFIXES)
     return result
 
 
@@ -1213,28 +1263,23 @@ def _verify_recovered_database(
                 f"expected {SCHEMA_VERSION}"
             )
 
+        prefix_predicate, prefix_params = _generated_meta_prefix_sql(
+            "key", include=True
+        )
         meta = {
             str(row[0]): row[1]
             for row in conn.execute(
-                "SELECT key, value FROM state_meta WHERE key LIKE 'fts_%'"
+                f"SELECT key, value FROM state_meta WHERE {prefix_predicate}",
+                prefix_params,
             ).fetchall()
         }
         verification["fts_meta"] = meta
-        if meta.get("fts_storage_version") != str(FTS_STORAGE_VERSION):
+        if meta.get(_FTS_STORAGE_META_KEY) != str(FTS_STORAGE_VERSION):
             verification["errors"].append(
                 "fresh FTS storage version was not established"
             )
         pending_keys = sorted(
-            key
-            for key in (
-                "fts_optimize_available",
-                "fts_rebuild_high_water",
-                "fts_rebuild_progress",
-                "fts_cjk_stale",
-                "fts_cjk_rebuild_high_water",
-                "fts_cjk_rebuild_progress",
-            )
-            if key in meta
+            key for key in meta if key != _FTS_STORAGE_META_KEY
         )
         verification["pending_fts_keys"] = pending_keys
         if pending_keys:
@@ -1429,18 +1474,19 @@ def _finalize_derived_metadata(destination: sqlite3.Connection) -> dict[str, Any
         result["error"] = "; ".join(projection["errors"])
         return result
 
-    fts_keys = tuple(key for key in _GENERATED_META_KEYS if key.startswith("fts_"))
-    placeholders = ", ".join("?" for _ in fts_keys)
+    prefix_predicate, prefix_params = _generated_meta_prefix_sql(
+        "key", include=True
+    )
     destination.execute("BEGIN IMMEDIATE")
     try:
         destination.execute(
-            f"DELETE FROM state_meta WHERE key IN ({placeholders})",
-            fts_keys,
+            f"DELETE FROM state_meta WHERE {prefix_predicate}",
+            prefix_params,
         )
         destination.execute(
             "INSERT INTO state_meta(key, value) VALUES (?, ?) "
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            ("fts_storage_version", str(FTS_STORAGE_VERSION)),
+            (_FTS_STORAGE_META_KEY, str(FTS_STORAGE_VERSION)),
         )
         destination.execute("COMMIT")
     except BaseException:
