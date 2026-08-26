@@ -700,4 +700,112 @@ def test_recover_verification_rejects_partial_trigram_projection(
     assert projection["messages_fts_trigram_src"] > 1
 
 
+def test_recovery_drops_all_source_owned_fts_metadata(tmp_path: Path) -> None:
+    """A fresh destination must not inherit any source FTS lifecycle state."""
+    source = tmp_path / "state.db"
+    output = tmp_path / "recovered.db"
+    expected_source = _make_source(source)
+    expected: dict[str, int | None] = {
+        "sessions": expected_source["sessions"],
+        "messages": expected_source["messages"],
+    }
+
+    conn = sqlite3.connect(str(source), isolation_level=None)
+    try:
+        conn.executemany(
+            "INSERT OR REPLACE INTO state_meta(key, value) VALUES (?, ?)",
+            (
+                ("fts_storage_version", "999"),
+                ("fts_stale", "1"),
+                ("fts_rebuild_deferral", '{"reason":"source-only"}'),
+                ("fts_teardown_fts_v22_trash_messages_fts_data_progress", "42"),
+                ("fts", "near-miss"),
+                ("ftsz_user_key", "near-miss"),
+            ),
+        )
+    finally:
+        conn.close()
+
+    report = recover_session_database(source, output)
+
+    assert report["verified"] is True
+    assert report["verification"]["pending_fts_keys"] == []
+    meta_copy = report["copy"]["state_meta"]
+    assert meta_copy["excluded_prefixes"] == ["fts_"]
+    assert meta_copy["excluded_rows"] == (
+        meta_copy["source_meta_rows"] - meta_copy["copied_rows"]
+    )
+    conn = sqlite3.connect(str(output))
+    try:
+        meta = dict(conn.execute("SELECT key, value FROM state_meta"))
+    finally:
+        conn.close()
+    assert meta["goal:recovery-session-0"] == '{"status":"active"}'
+    assert meta["fts"] == "near-miss"
+    assert meta["ftsz_user_key"] == "near-miss"
+    assert meta["fts_storage_version"] == str(FTS_STORAGE_VERSION)
+    assert {key for key in meta if key.startswith("fts_")} == {
+        "fts_storage_version"
+    }
+
+    conn = sqlite3.connect(str(output), isolation_level=None)
+    try:
+        conn.execute(
+            "INSERT INTO state_meta(key, value) VALUES ('fts_future_marker', '1')"
+        )
+    finally:
+        conn.close()
+    verification = _verify_recovered_database(
+        output,
+        expected_counts=expected,
+        copy_report={},
+    )
+    assert verification["healthy"] is False
+    assert verification["pending_fts_keys"] == ["fts_future_marker"]
+
+
+def test_state_meta_salvage_excludes_generated_namespace() -> None:
+    """Partial-row salvage must apply the same metadata ownership contract."""
+    source = sqlite3.connect(":memory:", isolation_level=None)
+    destination = sqlite3.connect(":memory:", isolation_level=None)
+    try:
+        for conn in (source, destination):
+            conn.execute(
+                "CREATE TABLE state_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+            )
+        rows = (
+            ("goal:survives", "1"),
+            ("fts", "near-miss"),
+            ("ftsz_user_key", "near-miss"),
+            ("fts_stale", "1"),
+            ("fts_future_marker", "1"),
+            ("telegram_dm_topic_schema_version", "1"),
+        )
+        source.executemany(
+            "INSERT INTO state_meta(key, value) VALUES (?, ?)", rows
+        )
+
+        result = session_recovery._copy_state_meta_salvage(
+            source,
+            destination,
+            chunk_size=2,
+            progress_cb=None,
+            source_rows=len(rows),
+        )
+
+        copied = dict(destination.execute("SELECT key, value FROM state_meta"))
+    finally:
+        source.close()
+        destination.close()
+
+    assert result["status"] == "complete"
+    assert result["copied_rows"] == 3
+    assert result["excluded_rows"] == 3
+    assert result["excluded_prefixes"] == ["fts_"]
+    assert copied == {
+        "goal:survives": "1",
+        "fts": "near-miss",
+        "ftsz_user_key": "near-miss",
+    }
+
 
