@@ -15,6 +15,8 @@ containers?" section, and the Container lifecycle paragraph under
 Docker Backend in ``website/docs/user-guide/configuration.md``.
 """
 
+from pathlib import Path
+
 import pytest
 
 from tools import terminal_tool
@@ -309,3 +311,169 @@ def test_shared_key_ignored_outside_persistent_docker(monkeypatch):
         assert terminal_tool._resolve_container_task_id(None) == "session:sess-A"
     finally:
         clear_session_vars(tokens)
+
+
+def test_profile_name_from_session_key():
+    assert terminal_tool.profile_name_from_session_key("agent:main:telegram:dm:1") == "default"
+    assert terminal_tool.profile_name_from_session_key("agent:coder:telegram:dm:1") == "coder"
+    assert terminal_tool.profile_name_from_session_key("") == "default"
+    assert terminal_tool.profile_name_from_session_key("sess-A") == "default"
+
+
+def test_multiplex_does_not_leak_default_shared_key(tmp_path, monkeypatch):
+    # os.environ holds the default profile's key. A secondary profile with
+    # no key in its own config must stay isolated.
+    from agent import secret_scope
+    from gateway.session_context import clear_session_vars, set_session_vars
+
+    home = tmp_path / ".hermes"
+    home.mkdir()
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    work = home / "profiles" / "work"
+    work.mkdir(parents=True)
+    (work / "config.yaml").write_text(
+        "terminal:\n  docker_shared_container_key: ''\n", encoding="utf-8"
+    )
+
+    _persistent_docker(monkeypatch)
+    monkeypatch.setenv("TERMINAL_DOCKER_SHARED_CONTAINER_KEY", "team/workspace")
+    previous = secret_scope.is_multiplex_active()
+    secret_scope.set_multiplex_active(True)
+    tokens = set_session_vars(session_key="agent:work:telegram:dm:1", profile="work")
+    try:
+        assert terminal_tool._resolve_container_task_id(None) == "profile:work"
+    finally:
+        clear_session_vars(tokens)
+        secret_scope.set_multiplex_active(previous)
+
+
+def test_multiplex_honors_secondary_profile_shared_key(tmp_path, monkeypatch):
+    from agent import secret_scope
+    from gateway.session_context import clear_session_vars, set_session_vars
+
+    home = tmp_path / ".hermes"
+    home.mkdir()
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    work = home / "profiles" / "work"
+    work.mkdir(parents=True)
+    (work / "config.yaml").write_text(
+        "terminal:\n  docker_shared_container_key: work-lab\n", encoding="utf-8"
+    )
+
+    _persistent_docker(monkeypatch)
+    monkeypatch.setenv("TERMINAL_DOCKER_SHARED_CONTAINER_KEY", "team/workspace")
+    previous = secret_scope.is_multiplex_active()
+    secret_scope.set_multiplex_active(True)
+    tokens = set_session_vars(session_key="agent:work:telegram:dm:1", profile="work")
+    try:
+        assert terminal_tool._resolve_container_task_id(None) == "shared:work-lab"
+    finally:
+        clear_session_vars(tokens)
+        secret_scope.set_multiplex_active(previous)
+
+
+def test_sandbox_candidates_follow_session_profile(monkeypatch):
+    from gateway.platforms.base import _docker_sandbox_dir_candidates
+    from tools.environments.base import sanitize_task_id_for_path
+
+    monkeypatch.delenv("TERMINAL_DOCKER_SHARED_CONTAINER_KEY", raising=False)
+    names = _docker_sandbox_dir_candidates("agent:coder:telegram:dm:1")
+    assert names[0] == sanitize_task_id_for_path("profile:coder")
+    assert "default" in names
+    assert names[-1] == sanitize_task_id_for_path("session:agent:coder:telegram:dm:1")
+
+
+def test_sandbox_candidates_default_session_stays_default(monkeypatch):
+    from gateway.platforms.base import _docker_sandbox_dir_candidates
+    from tools.environments.base import sanitize_task_id_for_path
+
+    monkeypatch.delenv("TERMINAL_DOCKER_SHARED_CONTAINER_KEY", raising=False)
+    names = _docker_sandbox_dir_candidates("agent:main:telegram:dm:123456")
+    assert names[0] == "default"
+    assert sanitize_task_id_for_path("profile:custom") not in names
+    assert sanitize_task_id_for_path("session:agent:main:telegram:dm:123456") in names
+
+
+def test_sandbox_candidates_multiplex_does_not_use_default_shared_key(tmp_path, monkeypatch):
+    from agent import secret_scope
+    from gateway.platforms.base import _docker_sandbox_dir_candidates
+    from tools.environments.base import sanitize_task_id_for_path
+
+    home = tmp_path / ".hermes"
+    home.mkdir()
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    work = home / "profiles" / "work"
+    work.mkdir(parents=True)
+    (work / "config.yaml").write_text("terminal: {}\n", encoding="utf-8")
+    monkeypatch.setenv("TERMINAL_DOCKER_SHARED_CONTAINER_KEY", "team/workspace")
+    previous = secret_scope.is_multiplex_active()
+    secret_scope.set_multiplex_active(True)
+    try:
+        names = _docker_sandbox_dir_candidates("agent:work:telegram:dm:1")
+    finally:
+        secret_scope.set_multiplex_active(previous)
+    assert names[0] == sanitize_task_id_for_path("profile:work")
+    assert sanitize_task_id_for_path("shared:team/workspace") not in names
+
+
+def test_multiplex_probe_error_does_not_leak_default_shared_key(tmp_path, monkeypatch):
+    # If is_multiplex_active() throws, a secondary profile must not inherit
+    # the process env key.
+    from agent import secret_scope
+    from gateway.session_context import clear_session_vars, set_session_vars
+
+    home = tmp_path / ".hermes"
+    home.mkdir()
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    work = home / "profiles" / "work"
+    work.mkdir(parents=True)
+    (work / "config.yaml").write_text("terminal: {}\n", encoding="utf-8")
+
+    _persistent_docker(monkeypatch)
+    monkeypatch.setenv("TERMINAL_DOCKER_SHARED_CONTAINER_KEY", "team/workspace")
+
+    def _boom():
+        raise RuntimeError("multiplex probe failed")
+
+    monkeypatch.setattr(secret_scope, "is_multiplex_active", _boom)
+    tokens = set_session_vars(session_key="agent:work:telegram:dm:1", profile="work")
+    try:
+        assert terminal_tool._resolve_container_task_id(None) == "profile:work"
+    finally:
+        clear_session_vars(tokens)
+
+
+def test_sandbox_candidates_key_lookup_error_does_not_use_default_shared_key(monkeypatch):
+    from gateway.platforms.base import _docker_sandbox_dir_candidates
+    from tools.environments.base import sanitize_task_id_for_path
+
+    monkeypatch.setenv("TERMINAL_DOCKER_SHARED_CONTAINER_KEY", "team/workspace")
+
+    def _boom(profile=None):
+        raise RuntimeError("key lookup failed")
+
+    monkeypatch.setattr(
+        "tools.terminal_tool.docker_shared_container_key_for_profile", _boom
+    )
+    names = _docker_sandbox_dir_candidates("agent:coder:telegram:dm:1")
+    assert sanitize_task_id_for_path("shared:team/workspace") not in names
+    assert names[0] == sanitize_task_id_for_path("profile:coder")
+    assert "default" in names
+
+
+def test_sandbox_candidates_unknown_profile_does_not_use_default(monkeypatch):
+    from gateway.platforms.base import _docker_sandbox_dir_candidates
+
+    monkeypatch.setenv("TERMINAL_DOCKER_SHARED_CONTAINER_KEY", "team/workspace")
+
+    def _boom():
+        raise RuntimeError("no active profile")
+
+    monkeypatch.setattr("hermes_cli.profiles.get_active_profile_name", _boom)
+    names = _docker_sandbox_dir_candidates("")
+    assert names == []
+    assert "default" not in names

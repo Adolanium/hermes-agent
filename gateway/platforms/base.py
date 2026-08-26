@@ -1551,20 +1551,45 @@ def _docker_sandbox_dir_candidates(session_key: str = "") -> List[str]:
     try:
         from tools.environments.base import sanitize_task_id_for_path
     except Exception:
-        return ["default"]
-    # Explicit trusted-profiles opt-in: one shared container identity.
-    shared = os.getenv("TERMINAL_DOCKER_SHARED_CONTAINER_KEY", "").strip()
+        return []
+
+    profile: Optional[str] = None
+    if session_key:
+        try:
+            from tools.terminal_tool import profile_name_from_session_key
+
+            profile = profile_name_from_session_key(session_key)
+        except Exception:
+            parts = str(session_key).split(":")
+            if len(parts) >= 2 and parts[0] == "agent":
+                namespace = parts[1] or "main"
+                profile = "default" if namespace == "main" else namespace
+    else:
+        try:
+            from hermes_cli.profiles import get_active_profile_name
+
+            profile = get_active_profile_name() or "default"
+        except Exception:
+            profile = None
+        if profile == "custom":
+            profile = "default"
+
+    shared = ""
+    if profile is not None:
+        try:
+            from tools.terminal_tool import docker_shared_container_key_for_profile
+
+            shared = docker_shared_container_key_for_profile(profile)
+        except Exception:
+            shared = ""
     if shared:
         candidates.append(sanitize_task_id_for_path(f"shared:{shared}"))
-    try:
-        from hermes_cli.profiles import get_active_profile_name
-
-        profile = get_active_profile_name() or "default"
-    except Exception:
-        profile = "default"
-    if profile != "default":
+    if profile and profile != "default":
         candidates.append(sanitize_task_id_for_path(f"profile:{profile}"))
-    candidates.append("default")
+    if profile is not None:
+        # Known profile still falls back to the shared default sandbox so a
+        # file that landed there still delivers. Unknown profile does not.
+        candidates.append("default")
     if session_key:
         # Bug-window legacy layout: per-session sandboxes.
         candidates.append(sanitize_task_id_for_path(f"session:{session_key}"))

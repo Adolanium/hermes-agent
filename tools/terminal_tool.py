@@ -1438,6 +1438,101 @@ def _current_session_profile() -> str:
     return get_session_env("HERMES_SESSION_PROFILE", "")
 
 
+def _normalize_docker_profile_name(profile: Optional[str]) -> str:
+    name = (profile or "").strip()
+    if not name or name in ("default", "main"):
+        return "default"
+    return name
+
+
+def profile_name_from_session_key(session_key: Optional[str]) -> str:
+    """Profile namespace encoded in a gateway session key (agent:<profile>:...)."""
+    parts = str(session_key or "").split(":")
+    if len(parts) < 2 or parts[0] != "agent":
+        return "default"
+    namespace = parts[1] or "main"
+    return "default" if namespace == "main" else namespace
+
+
+def _is_process_docker_profile(name: str) -> bool:
+    """True when *name* is the profile this process was launched as."""
+    try:
+        from hermes_cli.profiles import get_active_profile_name
+
+        active = _normalize_docker_profile_name(get_active_profile_name())
+    except Exception:
+        active = "default"
+    if name == active:
+        return True
+    # Tests and custom HERMES_HOME paths report "custom". The process
+    # config is still get_hermes_home(). Treat default as this process.
+    if name == "default" and active in ("default", "custom"):
+        return True
+    return False
+
+
+def _read_profile_docker_shared_key(name: str) -> str:
+    """Read terminal.docker_shared_container_key from that profile's config.yaml."""
+    try:
+        from hermes_constants import get_hermes_home
+        from hermes_cli.profiles import get_profile_dir
+
+        cfg_path = (
+            get_hermes_home() / "config.yaml"
+            if _is_process_docker_profile(name)
+            else get_profile_dir(name) / "config.yaml"
+        )
+        if not cfg_path.is_file():
+            return ""
+        import yaml
+
+        data = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+        if not isinstance(data, dict):
+            return ""
+        terminal = data.get("terminal") or {}
+        if not isinstance(terminal, dict):
+            return ""
+        return str(terminal.get("docker_shared_container_key") or "").strip()
+    except Exception:
+        return ""
+
+
+def docker_shared_container_key_for_profile(profile: Optional[str] = None) -> str:
+    """Read ``terminal.docker_shared_container_key`` for this profile.
+
+    Under multiplex, ``os.environ`` holds the default profile. A secondary
+    profile must not inherit that key. Read the named profile's config.yaml.
+    If multiplex is on and that file has no key, return empty (isolated).
+    If the multiplex probe throws, a secondary profile still returns empty.
+    Process env is used only for this process's own profile, or when
+    multiplex is known to be off (single-profile CLI/gateway).
+    """
+    name = _normalize_docker_profile_name(
+        profile if profile is not None else _current_session_profile()
+    )
+    from_file = _read_profile_docker_shared_key(name)
+    if from_file:
+        return from_file
+    try:
+        process_owned = _is_process_docker_profile(name)
+    except Exception:
+        process_owned = False
+    if process_owned:
+        return os.getenv("TERMINAL_DOCKER_SHARED_CONTAINER_KEY", "").strip()
+    multiplex_known = False
+    multiplex = False
+    try:
+        from agent.secret_scope import is_multiplex_active
+
+        multiplex = bool(is_multiplex_active())
+        multiplex_known = True
+    except Exception:
+        multiplex_known = False
+    if multiplex_known and not multiplex:
+        return os.getenv("TERMINAL_DOCKER_SHARED_CONTAINER_KEY", "").strip()
+    return ""
+
+
 _ISOLATION_OVERRIDE_KEYS = frozenset({
     "docker_image", "modal_image", "singularity_image",
     "daytona_image", "env_type",
@@ -1516,7 +1611,7 @@ def _resolve_container_task_id(task_id: Optional[str]) -> str:
             # Explicit opt-in: trusted profiles configuring the same
             # terminal.docker_shared_container_key share ONE container/cache
             # slot (and sandbox dir) regardless of profile name (#84671).
-            shared = os.getenv("TERMINAL_DOCKER_SHARED_CONTAINER_KEY", "").strip()
+            shared = docker_shared_container_key_for_profile()
             if shared:
                 return f"shared:{shared}"
             profile = _current_session_profile() or "default"
@@ -1529,7 +1624,7 @@ def _resolve_container_task_id(task_id: Optional[str]) -> str:
     # sessions land in "shared:<key>" — splitting the very container the
     # setting exists to unify.
     if _docker_persistent_profile_scoped():
-        shared = os.getenv("TERMINAL_DOCKER_SHARED_CONTAINER_KEY", "").strip()
+        shared = docker_shared_container_key_for_profile()
         if shared:
             return f"shared:{shared}"
     return "default"
