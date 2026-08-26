@@ -2,7 +2,8 @@ import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createClientSessionState } from '@/lib/chat-runtime'
-import { sessionMessagesSignature } from '@/lib/session-signatures'
+import { sessionListFingerprint } from '@/lib/session-signatures'
+import { makeSessionInfo } from '@/test/session-info'
 import { $changeEventsAvailable, notifySessionsChanged, resetLiveSync } from '@/store/live-sync'
 import {
   $activeSessionId,
@@ -265,22 +266,22 @@ describe('active transcript refresh', () => {
     const TILE_STORED_ID = 'stored-tile-2'
 
     const signatureRef = { current: new Map<string, string>() }
+    const row = makeSessionInfo({
+      id: TILE_STORED_ID,
+      last_active: 99,
+      message_count: 2,
+      preview: 'a'
+    })
+    setSessions([row])
+    signatureRef.current.set(`tile-meta:${TILE_STORED_ID}`, sessionListFingerprint(row))
 
-    // Pre-seed the signature with what the mock returns → no-change tick.
-    const pre = {
+    vi.mocked(getLatestSessionMessages).mockResolvedValue({
       messages: [
         { content: 'q', role: 'user', timestamp: 1 },
         { content: 'a', role: 'assistant', timestamp: 2 }
       ],
       session_id: TILE_STORED_ID
-    }
-
-    vi.mocked(getLatestSessionMessages).mockResolvedValue(pre as never)
-
-    // Compute the same signature the reconcile will compute, and pre-seed it.
-    const preSignature = sessionMessagesSignature(pre.messages as never)
-
-    signatureRef.current.set(`tile:${TILE_STORED_ID}`, preSignature)
+    } as never)
 
     const updateSessionState = vi.fn()
     const busyRef = { current: false }
@@ -296,6 +297,7 @@ describe('active transcript refresh', () => {
       })
     })
 
+    expect(getLatestSessionMessages).not.toHaveBeenCalled()
     expect(updateSessionState).not.toHaveBeenCalled()
   })
 

@@ -5,7 +5,7 @@ import { graftRefreshedTailOntoBackfill } from '@/app/chat/transcript-backfill'
 import { getLatestSessionMessages, type ProfileScope } from '@/hermes'
 import { preserveLocalAssistantErrors, sealOpenToolParts, toChatMessages } from '@/lib/chat-messages'
 import { createClientSessionState } from '@/lib/chat-runtime'
-import { sessionMessagesSignature } from '@/lib/session-signatures'
+import { sessionListFingerprint, sessionMessagesSignature } from '@/lib/session-signatures'
 import { $changeEventsAvailable, $cronChangeTick, $sessionsChangeTick } from '@/store/live-sync'
 import { $onBattery, batteryPollInterval } from '@/store/power'
 import { refreshActiveProfile } from '@/store/profile'
@@ -72,9 +72,11 @@ export interface ActiveTranscriptRefreshDeps {
  * $messagingSessions (they carry the core `hidden` flag), so the main-pane
  * reconcile path's resolveSession() bails on them and a background delivery
  * never reaches an open bot chat. Each tile carries its own stored↔runtime id
- * pair, so no resolution step is needed; refreshes are signature-gated per
- * tile so a no-change event costs nothing, and a busy tile is skipped (its own
- * stream owns the view while streaming).
+ * pair, so no resolution step is needed. When the session row is in
+ * $sessions / $messagingSessions and message_count, last_active, and preview
+ * have not moved, the 120-row transcript fetch is skipped. Hidden tiles with
+ * no row still fetch. A busy tile is skipped (its own stream owns the view
+ * while streaming).
  *
  * Sequencing note (#94255 review): all tiles SHARE one request sequence, so a
  * second tick arriving mid-read invalidates every in-flight read from the
@@ -127,6 +129,17 @@ export async function reconcileTileTranscripts({
       ? tilesOverride.some(t => t.storedSessionId === storedSessionId && t.runtimeId === runtimeSessionId)
       : $sessionTiles.get().some(t => t.storedSessionId === storedSessionId && t.runtimeId === runtimeSessionId)
 
+    const listRow =
+      $sessions.get().find(session => sessionMatchesStoredId(session, storedSessionId)) ??
+      $messagingSessions.get().find(session => sessionMatchesStoredId(session, storedSessionId))
+    if (listRow) {
+      const cheapKey = `tile-meta:${storedSessionId}`
+      const cheap = sessionListFingerprint(listRow)
+      if (signatureRef.current.get(cheapKey) === cheap) {
+        continue
+      }
+    }
+
     try {
       const latest = await getLatestSessionMessages(storedSessionId)
 
@@ -147,6 +160,9 @@ export async function reconcileTileTranscripts({
       }
 
       signatureRef.current.set(signatureKey, signature)
+      if (listRow) {
+        signatureRef.current.set(`tile-meta:${storedSessionId}`, sessionListFingerprint(listRow))
+      }
       const messages = toChatMessages(latest.messages)
 
       updateSessionState(
@@ -506,7 +522,8 @@ export function useBackgroundSync({
   const activeTranscriptBusy = useStore($busy)
   const activeTranscriptRefreshPendingRef = useRef<string | null>(null)
   // Tile reconcile state (#93942 slice 1): shared sequence guard + per-tile
-  // transcript signatures, so no-change ticks and closed tiles cost nothing.
+  // signatures. Sidebar rows skip the transcript fetch when the list
+  // fingerprint is unchanged. Closed tiles prune their signature.
   const tileRequestSequenceRef = useRef(0)
   const tileSignatureRef = useRef(new Map<string, string>())
   // Read $busy.get() directly inside the reconcile loop instead of mirroring
@@ -655,8 +672,8 @@ export function useBackgroundSync({
       requestActiveTranscriptRefresh(true)
       // Bot canonical chats live in workspace tiles, never in the main-pane
       // selection — without this they never see background deliveries
-      // (#93942 scenario A). Signature-gated per tile, so no-change ticks
-      // cost nothing.
+      // (#93942 scenario A). Sidebar rows skip the transcript fetch when
+      // message_count / last_active / preview have not moved.
       void reconcileTileTranscripts({
         busyRef: {
           get current() {
