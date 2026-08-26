@@ -19,11 +19,10 @@
  *     loud failure when the keychain is unavailable, per-save plain-text
  *     confirm dialog as the escape hatch.
  *
- * Legacy blobs written before the flag existed are safeStorage-encoded on
- * disk. With the setting OFF we attempt ONE migration pass (decrypt →
- * rewrite as plain). The pass is recorded in the same settings file whether
- * or not it succeeds, so a broken keychain costs at most one prompt on the
- * first post-update launch — never one per launch.
+ * Legacy blobs written before the flag existed stay safeStorage-encoded on
+ * disk. Encryption OFF only changes NEW writes (plain). Existing ciphertext
+ * is still decrypted on read. We do not rewrite live secrets to plaintext
+ * on first launch.
  *
  * Kept standalone (no `import 'electron'`) so it unit-tests under the
  * electron vitest project, same pattern as native-token-store.ts. main.ts
@@ -78,25 +77,19 @@ interface StoredSecret {
 /**
  * Decide what to do with one stored blob under the current policy.
  *
- *   - 'keep'    — blob is fine as-is under this policy.
- *   - 'migrate' — safeStorage blob while encryption is OFF and migration has
- *                 not run: caller should decrypt once and rewrite as plain.
- *   - 'drop'    — safeStorage blob while encryption is OFF and the migration
- *                 pass already ran (i.e. it could not be decrypted last
- *                 time): treat as absent WITHOUT touching safeStorage, so a
- *                 dead keychain never prompts again.
+ *   - 'keep' — blob is fine as-is. safeStorage blobs stay encrypted even
+ *              when the opt-in is OFF, so a working keychain is not stripped
+ *              to plaintext on first launch after update.
+ *   - 'drop' — unused by the default path. Kept so a future explicit
+ *              "forget undecryptable blobs" pass can still name the case.
  */
 export function classifyStoredSecret(
   secret: StoredSecret | null | undefined,
-  policy: SecretStoragePolicy
+  _policy: SecretStoragePolicy
 ): 'keep' | 'migrate' | 'drop' {
   if (!secret || typeof secret !== 'object' || secret.encoding !== 'safeStorage') {
     return 'keep'
   }
 
-  if (policy.on) {
-    return 'keep'
-  }
-
-  return policy.migrated ? 'drop' : 'migrate'
+  return 'keep'
 }

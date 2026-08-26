@@ -3,10 +3,9 @@
  * encryption enabled at all?" decision seam.
  *
  * The behavior this file pins: keychain-backed encryption is OPT-IN
- * (default OFF), and once the one-shot legacy migration has run, a
- * safeStorage blob under an opted-out policy reads as 'drop' — i.e. the
- * caller must treat it as absent WITHOUT touching safeStorage, so a broken
- * macOS login keychain can never raise its password dialog on launch.
+ * (default OFF) for NEW writes. Existing safeStorage blobs stay
+ * encrypted and are still decrypted on read. We never rewrite them to
+ * plaintext just because the default flipped.
  *
  * (Wired into the vitest `electron` project via electron/**\/*.test.ts.)
  */
@@ -94,10 +93,7 @@ test('safeStorage blob with encryption ON is keep', () => {
   assert.equal(classifyStoredSecret(SAFE_BLOB, { on: true, migrated: true }), 'keep')
 })
 
-test('safeStorage blob, encryption OFF, pre-migration is migrate', () => {
-  assert.equal(classifyStoredSecret(SAFE_BLOB, { on: false, migrated: false }), 'migrate')
-})
-
-test('safeStorage blob, encryption OFF, post-migration is drop — never touch the keychain again', () => {
-  assert.equal(classifyStoredSecret(SAFE_BLOB, { on: false, migrated: true }), 'drop')
+test('safeStorage blob stays keep when encryption is OFF', () => {
+  assert.equal(classifyStoredSecret(SAFE_BLOB, { on: false, migrated: false }), 'keep')
+  assert.equal(classifyStoredSecret(SAFE_BLOB, { on: false, migrated: true }), 'keep')
 })

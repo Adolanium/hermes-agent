@@ -8381,14 +8381,14 @@ function setSecretStoragePolicy(next: SecretStoragePolicy) {
 
 /**
  * Keychain availability as the renderer should see it. With encryption
- * opted out this must NOT probe safeStorage — isEncryptionAvailable() is
+ * opted out this must NOT probe safeStorage. isEncryptionAvailable() is
  * itself a keychain touch that raises the macOS dialog this feature exists
- * to avoid. We report `true` so no plain-text warning banners fire: storing
- * plaintext is the user's chosen (default) mode, not a degraded state.
+ * to avoid. Report false so save-as-plain-text warnings stay honest: new
+ * writes are plaintext by choice, not "secure storage is available".
  */
 function probeSecureTokenStorage(): boolean {
   if (!secretStoragePolicy().on) {
-    return true
+    return false
   }
 
   try {
@@ -8401,8 +8401,8 @@ function probeSecureTokenStorage(): boolean {
 /**
  * Rewrite every stored desktop secret (v1 connection.json token/headers +
  * per-profile overrides, v2 registry connections, native OAuth token store)
- * through `reencode`. Returns true when any store was rewritten. Shared by
- * the one-shot legacy migration and the Settings encryption toggle.
+ * through `reencode`. Returns true when any store was rewritten. Used by
+ * the Settings encryption toggle.
  */
 function rewriteAllStoredSecrets(shouldRewrite: (secret: any) => boolean, reencode: (secret: any) => any): boolean {
   let touched = false
@@ -8467,53 +8467,19 @@ function rewriteAllStoredSecrets(shouldRewrite: (secret: any) => boolean, reenco
 }
 
 /**
- * One-shot legacy migration: builds before the opt-in policy wrote every
- * secret as a safeStorage blob. With encryption now defaulting OFF, decrypt
- * each stored blob once and rewrite it as plain so no future launch touches
- * the keychain. Marked `migrated` whether or not every blob decrypts — a
- * broken keychain costs at most ONE prompt (this pass), never one per
- * launch; blobs that would not decrypt are left in place and simply read as
- * absent from then on (classifyStoredSecret → 'drop'), so opting encryption
- * back ON later can still recover them on a healthy keychain.
- *
- * Runs before createWindow() so every later read sees the final encodings.
+ * First launch after the opt-in flag existed used to decrypt every
+ * safeStorage blob and rewrite it as plaintext. That dumped live gateway
+ * and OAuth tokens into userData. We no longer rewrite. Existing ciphertext
+ * stays ciphertext. New writes follow the opt-in (plain when OFF).
  */
 function migrateLegacyEncryptedSecretsOnce() {
   const policy = secretStoragePolicy()
 
-  if (policy.on || policy.migrated) {
+  if (policy.migrated) {
     return
   }
 
-  const needsMigration = (secret: any) => classifyStoredSecret(secret, policy) === 'migrate'
-
-  const reencode = (secret: any) => {
-    if (!needsMigration(secret)) {
-      return secret
-    }
-
-    const plaintext = decryptDesktopSecret(secret)
-
-    // Undecryptable now (locked/absent keychain): keep the blob for a
-    // potential future opt-in, but post-migration reads treat it as unset.
-    return plaintext ? { encoding: 'plain', value: plaintext } : secret
-  }
-
-  let touchedKeychain = false
-
-  try {
-    touchedKeychain = rewriteAllStoredSecrets(needsMigration, reencode)
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error)
-
-    rememberLog(`[secret-storage] legacy migration pass failed: ${detail}`)
-  }
-
-  setSecretStoragePolicy({ on: false, migrated: true })
-
-  if (touchedKeychain) {
-    rememberLog('[secret-storage] migrated legacy keychain-encrypted secrets to opt-out storage (one-shot pass)')
-  }
+  setSecretStoragePolicy({ on: policy.on, migrated: true })
 }
 
 /**
@@ -8549,6 +8515,8 @@ function applySecretStorageEncryption(on: boolean) {
       )
     }
 
+    const previous = secretStoragePolicy()
+
     setSecretStoragePolicy({ on: true, migrated: true })
 
     try {
@@ -8556,10 +8524,7 @@ function applySecretStorageEncryption(on: boolean) {
         needsEncrypt(secret) ? encryptDesktopSecretStrict(String(secret.value), safeStorage) : secret
       )
     } catch (error) {
-      // Encryption failed midway: revert the policy so reads keep working
-      // against whatever encodings are on disk (mixed stores read fine —
-      // decryptDesktopSecret handles both encodings under either policy).
-      setSecretStoragePolicy({ on: false, migrated: true })
+      setSecretStoragePolicy(previous)
       throw error
     }
 
@@ -8607,10 +8572,9 @@ function decryptDesktopSecret(secret) {
   }
 
   if (secret.encoding === SAFE_STORAGE_ENCODING) {
-    // Legacy blob under an opted-out policy: once the one-shot migration pass
-    // has run, never touch safeStorage again — a dead keychain would otherwise
-    // prompt on every read. Before that pass, decryption is allowed so the
-    // migration itself (and this launch's reads) can recover the value.
+    // Existing ciphertext is still decrypted on read even when new writes
+    // are plain. Skipping safeStorage here would drop live gateway and
+    // OAuth tokens after the opt-in default flipped to OFF.
     if (classifyStoredSecret(secret, secretStoragePolicy()) === 'drop') {
       return ''
     }
@@ -16103,11 +16067,8 @@ app.whenReady().then(() => {
     safeStorageApi: safeStorage
   })
 
-  // Keychain encryption is opt-in (default OFF). One-shot: rewrite any
-  // legacy safeStorage-encrypted secrets as plain so no later launch ever
-  // touches the OS keychain unless the user turns encryption on in
-  // Settings → Gateway. Must run before createWindow() and the first
-  // connection resolution.
+  // Keychain encryption is opt-in (default OFF) for new writes. Do not
+  // rewrite existing ciphertext to plaintext on first launch.
   migrateLegacyEncryptedSecretsOnce()
 
   if (IS_MAC) {
