@@ -381,7 +381,7 @@ def test_sandbox_candidates_follow_session_profile(monkeypatch):
     monkeypatch.delenv("TERMINAL_DOCKER_SHARED_CONTAINER_KEY", raising=False)
     names = _docker_sandbox_dir_candidates("agent:coder:telegram:dm:1")
     assert names[0] == sanitize_task_id_for_path("profile:coder")
-    assert "default" in names
+    assert "default" not in names
     assert names[-1] == sanitize_task_id_for_path("session:agent:coder:telegram:dm:1")
 
 
@@ -417,6 +417,7 @@ def test_sandbox_candidates_multiplex_does_not_use_default_shared_key(tmp_path, 
         secret_scope.set_multiplex_active(previous)
     assert names[0] == sanitize_task_id_for_path("profile:work")
     assert sanitize_task_id_for_path("shared:team/workspace") not in names
+    assert "default" not in names
 
 
 def test_multiplex_probe_error_does_not_leak_default_shared_key(tmp_path, monkeypatch):
@@ -462,7 +463,7 @@ def test_sandbox_candidates_key_lookup_error_does_not_use_default_shared_key(mon
     names = _docker_sandbox_dir_candidates("agent:coder:telegram:dm:1")
     assert sanitize_task_id_for_path("shared:team/workspace") not in names
     assert names[0] == sanitize_task_id_for_path("profile:coder")
-    assert "default" in names
+    assert "default" not in names
 
 
 def test_sandbox_candidates_unknown_profile_does_not_use_default(monkeypatch):
@@ -477,3 +478,79 @@ def test_sandbox_candidates_unknown_profile_does_not_use_default(monkeypatch):
     names = _docker_sandbox_dir_candidates("")
     assert names == []
     assert "default" not in names
+
+
+def _enable_docker_sandbox(tmp_path, monkeypatch):
+    sandbox = tmp_path / "sandboxes"
+    monkeypatch.setenv("TERMINAL_ENV", "docker")
+    monkeypatch.setenv("TERMINAL_CONTAINER_PERSISTENT", "true")
+    monkeypatch.setenv("TERMINAL_SANDBOX_DIR", str(sandbox))
+    monkeypatch.delenv("TERMINAL_DOCKER_SHARED_CONTAINER_KEY", raising=False)
+    monkeypatch.delenv("TERMINAL_DOCKER_MOUNT_CWD_TO_WORKSPACE", raising=False)
+    return sandbox
+
+
+def _workspace(sandbox: Path, task_id: str) -> Path:
+    from tools.environments.base import sanitize_task_id_for_path
+
+    name = task_id if task_id == "default" else sanitize_task_id_for_path(task_id)
+    ws = sandbox / "docker" / name / "workspace"
+    ws.mkdir(parents=True, exist_ok=True)
+    return ws
+
+
+def _first_existing(roots, relative: str):
+    for root in roots:
+        candidate = root / relative
+        if candidate.is_file():
+            return candidate.resolve()
+    return None
+
+
+def test_named_profile_media_skips_unowned_default_workspace(tmp_path, monkeypatch):
+    # Default has foo.png, coder does not. Coder-routed MEDIA must not
+    # pick up the default profile's file.
+    from gateway.platforms.base import _default_docker_workspace_host_roots
+
+    sandbox = _enable_docker_sandbox(tmp_path, monkeypatch)
+    default_ws = _workspace(sandbox, "default")
+    (default_ws / "foo.png").write_bytes(b"default-copy")
+
+    roots = _default_docker_workspace_host_roots("agent:coder:telegram:dm:1")
+    assert default_ws.resolve() not in [r.resolve() for r in roots]
+    assert _first_existing(roots, "foo.png") is None
+
+
+def test_named_profile_media_prefers_own_workspace_copy(tmp_path, monkeypatch):
+    from gateway.platforms.base import _default_docker_workspace_host_roots
+
+    sandbox = _enable_docker_sandbox(tmp_path, monkeypatch)
+    default_ws = _workspace(sandbox, "default")
+    (default_ws / "foo.png").write_bytes(b"default-copy")
+    coder_ws = _workspace(sandbox, "profile:coder")
+    (coder_ws / "foo.png").write_bytes(b"coder-copy")
+
+    roots = _default_docker_workspace_host_roots("agent:coder:telegram:dm:1")
+    found = _first_existing(roots, "foo.png")
+    assert found is not None
+    assert found.read_bytes() == b"coder-copy"
+    assert default_ws.resolve() not in [r.resolve() for r in roots]
+
+
+def test_sandbox_roots_key_lookup_error_does_not_read_default_workspace(tmp_path, monkeypatch):
+    from gateway.platforms.base import _default_docker_workspace_host_roots
+
+    sandbox = _enable_docker_sandbox(tmp_path, monkeypatch)
+    monkeypatch.setenv("TERMINAL_DOCKER_SHARED_CONTAINER_KEY", "team/workspace")
+    default_ws = _workspace(sandbox, "default")
+    (default_ws / "foo.png").write_bytes(b"default-copy")
+
+    def _boom(profile=None):
+        raise RuntimeError("key lookup failed")
+
+    monkeypatch.setattr(
+        "tools.terminal_tool.docker_shared_container_key_for_profile", _boom
+    )
+    roots = _default_docker_workspace_host_roots("agent:coder:telegram:dm:1")
+    assert default_ws.resolve() not in [r.resolve() for r in roots]
+    assert _first_existing(roots, "foo.png") is None

@@ -1542,6 +1542,10 @@ def _docker_sandbox_dir_candidates(session_key: str = "") -> List[str]:
     live (``session:<session_key>``) are kept as a fallback candidate so
     files produced in that window still deliver (self-heal, no migration).
 
+    Named profiles never search the unowned ``default`` workspace. MEDIA
+    lookup is first-existing-file, so appending that sandbox would leak
+    same-name files from the default profile into a coder/work session.
+
     Takes the key explicitly because the delivery pipeline runs after
     ``_handle_message_with_agent`` cleared the turn's session contextvars
     (#93950) — an ambient lookup here would silently collapse onto
@@ -1586,9 +1590,11 @@ def _docker_sandbox_dir_candidates(session_key: str = "") -> List[str]:
         candidates.append(sanitize_task_id_for_path(f"shared:{shared}"))
     if profile and profile != "default":
         candidates.append(sanitize_task_id_for_path(f"profile:{profile}"))
-    if profile is not None:
-        # Known profile still falls back to the shared default sandbox so a
-        # file that landed there still delivers. Unknown profile does not.
+    if profile == "default":
+        # Default profile (and CLI) owns the shared "default" sandbox.
+        # Named profiles must not search it: that directory belongs to
+        # another profile, and first-existing-file lookup would leak
+        # same-name files across profiles.
         candidates.append("default")
     if session_key:
         # Bug-window legacy layout: per-session sandboxes.
