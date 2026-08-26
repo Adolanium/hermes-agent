@@ -370,6 +370,7 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
     ],
     "zai": [
         "glm-5.3",
+        "glm-5.3-flash",
         "glm-5.2",
         "glm-5.1",
         "glm-5",
@@ -541,6 +542,7 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "minimax-m2.7",
         "minimax-m2.5",
         "glm-5.3",
+        "glm-5.3-flash",
         "glm-5.2",
         "glm-5.1",
         "glm-5",
@@ -583,6 +585,7 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "gpt-5.6-luna",
         "grok-4.5",
         "glm-5.3",
+        "glm-5.3-flash",
         "glm-5.2",
         "glm-5.1",
         "glm-5",
