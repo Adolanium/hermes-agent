@@ -2973,8 +2973,8 @@ DEFAULT_CONFIG = {
         # firecrawl-anydoc converter.
         #   null (default) — hosted OCR runs only when FIRECRAWL_API_KEY is
         #     set. The key is the consent signal for document egress.
-        #   true — same as null (kept for readability: explicitly on,
-        #     still requires the key).
+        #   true — hosted OCR always runs: with FIRECRAWL_API_KEY when set,
+        #     keyless (free tier, no account) when not.
         #   false — hosted OCR fully off, even with a key.
         "hosted_ocr": None,
     },

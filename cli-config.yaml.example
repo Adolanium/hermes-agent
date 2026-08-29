@@ -731,6 +731,7 @@ compression:
 #
 # file_tools:
 #   hosted_ocr: null    # null (default): run hosted OCR only with FIRECRAWL_API_KEY
+#   # hosted_ocr: true  # always run: with the key when set, keyless (free) when not
 #   # hosted_ocr: false # fully off, even with a key
 
 # =============================================================================
