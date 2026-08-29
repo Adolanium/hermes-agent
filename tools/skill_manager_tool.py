@@ -1696,11 +1696,18 @@ def _skill_manage_batch(
                         # restore lands. Deleting first turned a failed
                         # copytree (disk full, locked file) into total
                         # skill loss once the finally below removed the
-                        # snapshot too. Move the broken state aside, and
-                        # delete it only after the snapshot is back.
-                        aside = post_dir.with_name(post_dir.name + ".rollback-broken")
-                        shutil.rmtree(aside, ignore_errors=True)
-                        post_dir.rename(aside)
+                        # snapshot too.
+                        # Keep the broken copy in a private temp dir, not
+                        # next to the skill. A name like
+                        # "<skill>.rollback-broken" is a valid skill name,
+                        # so using it as a sibling can delete a real skill.
+                        aside_parent = Path(tempfile.mkdtemp(prefix="skill_rollback_"))
+                        aside = aside_parent / "broken"
+                        try:
+                            post_dir.rename(aside)
+                        except Exception:
+                            shutil.rmtree(aside_parent, ignore_errors=True)
+                            raise
                         try:
                             shutil.copytree(snap, pre_dir)
                         except Exception:
@@ -1708,9 +1715,19 @@ def _skill_manage_batch(
                             # the skill survives (half applied) rather than
                             # leaving nothing.
                             shutil.rmtree(pre_dir, ignore_errors=True)
-                            aside.rename(pre_dir)
+                            try:
+                                aside.rename(pre_dir)
+                            finally:
+                                if not aside.exists():
+                                    shutil.rmtree(aside_parent, ignore_errors=True)
                             raise
-                        shutil.rmtree(aside, ignore_errors=True)
+                        try:
+                            shutil.rmtree(aside_parent)
+                        except Exception as cleanup_exc:
+                            notes.append(
+                                f"ROLLBACK FAILED for '{nm}' "
+                                f"(could not remove aside copy: {cleanup_exc})"
+                            )
                     else:
                         shutil.copytree(snap, pre_dir)
                 elif post_dir is not None and post_dir.is_dir():

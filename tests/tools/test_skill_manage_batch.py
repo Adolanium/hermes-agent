@@ -22,6 +22,7 @@ SK = (
 class TestSkillManageBatch(unittest.TestCase):
     def setUp(self):
         self.home = tempfile.mkdtemp(prefix="skmbatch_t_")
+        self._keep_dirs = []
         os.environ["HERMES_HOME"] = self.home
         os.environ["HERMES_YOLO_MODE"] = "1"
         os.makedirs(os.path.join(self.home, "skills"), exist_ok=True)
@@ -33,6 +34,8 @@ class TestSkillManageBatch(unittest.TestCase):
         self.smt = smt
 
     def tearDown(self):
+        for path in self._keep_dirs:
+            shutil.rmtree(path, ignore_errors=True)
         shutil.rmtree(self.home, ignore_errors=True)
 
     def _call(self, name, ops):
@@ -187,8 +190,16 @@ class TestSkillManageBatch(unittest.TestCase):
         import shutil as _shutil
 
         self._call("probe", [{"action": "create", "content": SK.format(n="probe")}])
+        # A sibling whose name matches the old aside path. Rollback must
+        # not delete it: that name is a valid skill name.
+        sibling = os.path.join(self.home, "skills", "probe.rollback-broken")
+        os.makedirs(sibling)
+        with open(os.path.join(sibling, "SKILL.md"), "w") as fh:
+            fh.write(SK.format(n="probe.rollback-broken").replace("Step 1.", "KEEP ME."))
         state = {"n": 0}
         real_copytree = _shutil.copytree
+        real_mkdtemp = tempfile.mkdtemp
+        batch_roots = []
 
         def flaky_copytree(src, dst, *a, **k):
             state["n"] += 1
@@ -196,7 +207,15 @@ class TestSkillManageBatch(unittest.TestCase):
                 raise OSError("disk full")
             return real_copytree(src, dst, *a, **k)
 
-        with _patch("shutil.copytree", side_effect=flaky_copytree):
+        def tracking_mkdtemp(*a, **k):
+            path = real_mkdtemp(*a, **k)
+            if k.get("prefix") == "skill_batch_":
+                batch_roots.append(path)
+                self._keep_dirs.append(path)
+            return path
+
+        with _patch("shutil.copytree", side_effect=flaky_copytree), \
+             _patch("tempfile.mkdtemp", side_effect=tracking_mkdtemp):
             r = self._call("probe", [
                 {"action": "patch",
                  "old_string": "Step 1.", "new_string": "Step ONE."},
@@ -211,6 +230,13 @@ class TestSkillManageBatch(unittest.TestCase):
         self.assertTrue(os.path.exists(skill_md))
         content = open(skill_md).read()
         self.assertIn("Step ONE.", content)
+        self.assertIn("KEEP ME.", open(os.path.join(sibling, "SKILL.md")).read())
+        self.assertEqual(len(batch_roots), 1, batch_roots)
+        snap_md = os.path.join(batch_roots[0], "probe", "SKILL.md")
+        self.assertTrue(os.path.exists(snap_md), snap_md)
+        snap_content = open(snap_md).read()
+        self.assertIn("Step 1.", snap_content)
+        self.assertNotIn("Step ONE.", snap_content)
 
     def test_single_op_path_unchanged(self):
         self._call("probe", [{"action": "create", "content": SK.format(n="probe")}])
