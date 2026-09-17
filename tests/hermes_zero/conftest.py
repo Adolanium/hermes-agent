@@ -10,7 +10,8 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 HOST_SRC = ROOT / "packages" / "hermes-host" / "src"
 SDK_SRC = ROOT / "packages" / "hermes-agent-sdk" / "src"
-for path in (HOST_SRC, SDK_SRC):
+ZERO_SRC = ROOT / "packages" / "hermes-zero" / "src"
+for path in (HOST_SRC, SDK_SRC, ZERO_SRC):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 

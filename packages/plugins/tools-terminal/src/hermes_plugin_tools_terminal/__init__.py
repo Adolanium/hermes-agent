@@ -55,3 +55,34 @@ def register(ctx) -> None:
     tool = TerminalTool(ctx)
     ctx.get_service("tool.registry").register(tool)
     ctx.register_service("tool.terminal", tool, unique=False)
+
+    def terminal_cmd(argv: list[str]) -> int:
+        cwd = str(Path.cwd())
+        command_parts: list[str] = []
+        i = 0
+        while i < len(argv):
+            token = argv[i]
+            if token == "--cwd" and i + 1 < len(argv):
+                cwd = argv[i + 1]
+                i += 2
+                continue
+            if token.startswith("--cwd="):
+                cwd = token.split("=", 1)[1]
+                i += 1
+                continue
+            command_parts = argv[i:]
+            break
+        if not command_parts:
+            print("usage: hermes terminal --cwd <dir> <command...>")
+            return 2
+        result = tool.invoke(
+            ToolCall(
+                id="cli",
+                name="terminal",
+                arguments={"command": " ".join(command_parts), "cwd": str(Path(cwd).expanduser().resolve())},
+            )
+        )
+        print(result.content, end="" if result.content.endswith("\n") else "\n")
+        return 1 if result.is_error else 0
+
+    ctx.register_command("terminal", terminal_cmd, help="Run a workspace command and exit")

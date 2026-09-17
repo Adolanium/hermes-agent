@@ -11,6 +11,10 @@
 
 ## Intentionally changed
 
+- `hermes` is CLI-only. `--tui`, `desktop`, `gateway`, and `dashboard` exit with an error.
+- Bare `hermes` prints help and exits. It does not open a prompt or TUI.
+- `hermes query` runs the real oneshot agent when `hermes_cli` is importable.
+
 - Bare host does not read `~/.hermes`. Pass `--home`.
 - Plugins are opt-in. Nothing is auto-enabled because it was bundled.
 - Unique services require explicit `[services]` selection when multiple providers exist.

@@ -18,6 +18,12 @@ class OpenAICompatProvider:
         self.model = model
 
     def complete(self, request: CompletionRequest) -> CompletionResult:
+        if not self.base_url or self.base_url.rstrip("/").endswith("://127.0.0.1:0") or self.base_url.endswith("127.0.0.1:0/v1"):
+            raise RuntimeError(
+                "model provider is not configured. Set plugins.settings.\"hermes.provider.openai-compat\" "
+                "base_url (and api_key if required) in host.toml, then re-run. "
+                "This CLI does not wait for interactive input."
+            )
         url = f"{self.base_url}/chat/completions"
         payload = {
             "model": request.model or self.model,
@@ -67,7 +73,7 @@ def _message_payload(message: Message) -> dict[str, Any]:
 def register(ctx) -> None:
     settings = ctx.settings()
     provider = OpenAICompatProvider(
-        base_url=str(settings.get("base_url") or "http://127.0.0.1:0/v1"),
+        base_url=str(settings.get("base_url") or ""),
         api_key=str(settings.get("api_key") or ""),
         model=str(settings.get("model") or "gpt-4o-mini"),
     )

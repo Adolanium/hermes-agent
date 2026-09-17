@@ -60,3 +60,11 @@ def register(ctx) -> None:
     registry.register(echo)
     ctx.register_service("tool.registry", registry)
     ctx.register_service("tool.echo", echo, unique=False)
+
+    def tools_cmd(_argv: list[str]) -> int:
+        for schema in registry.schemas():
+            function = schema.get("function") or {}
+            print(f"{function.get('name', ''):16} {function.get('description', '')}")
+        return 0
+
+    ctx.register_command("tools", tools_cmd, help="List programming tools and exit")

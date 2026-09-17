@@ -1,8 +1,11 @@
-# Smallest useful conversation: persistence + tools + one provider + runtime + stdio.
+# CLI-only programming agent. No TUI, desktop, or gateway.
 [plugins]
 enabled = [
-  "hermes.persistence",
+  "hermes.persistence.sqlite",
   "hermes.tools.core",
+  "hermes.policy.workspace",
+  "hermes.tools.fs",
+  "hermes.tools.terminal",
   "hermes.provider.openai-compat",
   "hermes.agent.runtime",
   "hermes.interface.stdio",

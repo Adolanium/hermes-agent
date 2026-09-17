@@ -1,0 +1,32 @@
+[project]
+name = "hermes-zero"
+version = "0.1.0"
+description = "Programming CLI for Hermes Zero: host + filesystem + terminal + one model adapter"
+requires-python = ">=3.11,<3.14"
+authors = [{ name = "Nous Research" }]
+license = "MIT"
+dependencies = [
+  "hermes-host==0.1.0",
+  "hermes-agent-sdk==0.1.0",
+  "hermes-plugin-persistence-sqlite==0.1.0",
+  "hermes-plugin-tools-core==0.1.0",
+  "hermes-plugin-tools-fs==0.1.0",
+  "hermes-plugin-tools-terminal==0.1.0",
+  "hermes-plugin-policy-workspace==0.1.0",
+  "hermes-plugin-openai-compat==0.1.0",
+  "hermes-plugin-agent-runtime==0.1.0",
+  "hermes-plugin-cli-stdio==0.1.0",
+]
+
+[project.scripts]
+hermes = "hermes_zero.cli:main"
+
+[build-system]
+requires = ["setuptools==83.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

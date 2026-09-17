@@ -55,6 +55,32 @@ class WriteFileTool(_FsTool):
 
 def register(ctx) -> None:
     registry = ctx.get_service("tool.registry")
-    for tool in (ReadFileTool(ctx), WriteFileTool(ctx)):
-        registry.register(tool)
+    reader = ReadFileTool(ctx)
+    writer = WriteFileTool(ctx)
+    registry.register(reader)
+    registry.register(writer)
     ctx.register_service("tool.fs", True, unique=False)
+
+    def read_cmd(argv: list[str]) -> int:
+        if not argv:
+            print("usage: hermes read <path>")
+            return 2
+        path = str(Path(argv[0]).expanduser().resolve())
+        result = reader.invoke(ToolCall(id="cli", name="read_file", arguments={"path": path}))
+        print(result.content, end="" if result.content.endswith("\n") else "\n")
+        return 1 if result.is_error else 0
+
+    def write_cmd(argv: list[str]) -> int:
+        if len(argv) < 2:
+            print("usage: hermes write <path> <content...>")
+            return 2
+        path = str(Path(argv[0]).expanduser().resolve())
+        content = " ".join(argv[1:])
+        result = writer.invoke(
+            ToolCall(id="cli", name="write_file", arguments={"path": path, "content": content})
+        )
+        print(result.content)
+        return 1 if result.is_error else 0
+
+    ctx.register_command("read", read_cmd, help="Read a workspace file and exit")
+    ctx.register_command("write", write_cmd, help="Write a workspace file and exit")
