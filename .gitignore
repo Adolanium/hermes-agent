@@ -42,6 +42,7 @@ tmp/
 temp_vision_images/
 hermes-*/*
 examples/
+!docs/hermes-zero/examples/
 tests/quick_test_dataset.jsonl
 tests/sample_dataset.jsonl
 run_datagen_kimik2-thinking.sh
@@ -64,6 +65,8 @@ privvy*
 images/
 __pycache__/
 hermes_agent.egg-info/
+*.egg-info/
+packages/**/build/
 wandb/
 testlogs
 playwright-report/

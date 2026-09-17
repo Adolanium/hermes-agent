@@ -1,0 +1,10 @@
+{
+  "id": "example.external-echo",
+  "version": "1.0.0",
+  "host_api": 1,
+  "name": "External shout tool",
+  "description": "Third-party tool that uses only public contracts",
+  "entry": "./plugin.py:register",
+  "requires": [{"service": "tool.registry"}],
+  "provides": [{"service": "tool.shout", "unique": false}]
+}

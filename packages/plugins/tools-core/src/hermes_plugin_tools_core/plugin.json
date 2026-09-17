@@ -1,0 +1,12 @@
+{
+  "id": "hermes.tools.core",
+  "version": "0.1.0",
+  "host_api": 1,
+  "name": "Core tools",
+  "description": "In-process tool registry plus the echo tool",
+  "entry": "hermes_plugin_tools_core:register",
+  "provides": [
+    {"service": "tool.registry", "unique": true},
+    {"service": "tool.echo", "unique": false}
+  ]
+}

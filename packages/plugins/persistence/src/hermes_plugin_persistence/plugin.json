@@ -1,0 +1,9 @@
+{
+  "id": "hermes.persistence",
+  "version": "0.1.0",
+  "host_api": 1,
+  "name": "Session persistence",
+  "description": "JSON session store under the plugin data directory",
+  "entry": "hermes_plugin_persistence:register",
+  "provides": [{"service": "persistence.sessions", "unique": true}]
+}

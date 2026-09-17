@@ -1,0 +1,13 @@
+{
+  "id": "hermes.tools.fs",
+  "version": "0.1.0",
+  "host_api": 1,
+  "name": "Filesystem tools",
+  "description": "read_file / write_file gated by the host privilege policy",
+  "entry": "hermes_plugin_tools_fs:register",
+  "requires": [
+    {"service": "tool.registry"},
+    {"service": "policy.privilege"}
+  ],
+  "provides": [{"service": "tool.fs", "unique": false}]
+}

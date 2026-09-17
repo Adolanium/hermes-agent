@@ -1,0 +1,18 @@
+# Smallest useful conversation: persistence + tools + one provider + runtime + stdio.
+[plugins]
+enabled = [
+  "hermes.persistence",
+  "hermes.tools.core",
+  "hermes.provider.openai-compat",
+  "hermes.agent.runtime",
+  "hermes.interface.stdio",
+]
+
+[services]
+# Required because the unique model.provider slot is explicit.
+"model.provider" = "hermes.provider.openai-compat"
+
+[plugins.settings."hermes.provider.openai-compat"]
+base_url = "http://127.0.0.1:0/v1"
+api_key = ""
+model = "local-fixture"

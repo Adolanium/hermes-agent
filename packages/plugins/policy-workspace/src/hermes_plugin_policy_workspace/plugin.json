@@ -1,0 +1,9 @@
+{
+  "id": "hermes.policy.workspace",
+  "version": "0.1.0",
+  "host_api": 1,
+  "name": "Workspace policy",
+  "description": "Allow filesystem ops only under an explicit workspace root; deny everything else",
+  "entry": "hermes_plugin_policy_workspace:register",
+  "provides": [{"service": "policy.privilege", "unique": true}]
+}

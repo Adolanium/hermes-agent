@@ -1,0 +1,11 @@
+{
+  "id": "hermes.interface.stdio",
+  "version": "0.1.0",
+  "host_api": 1,
+  "name": "Stdio interface",
+  "description": "Run a turn and print the result",
+  "entry": "hermes_plugin_cli_stdio:register",
+  "provides": [{"service": "interface.stdio", "unique": true}],
+  "requires": [{"service": "agent.runtime"}],
+  "depends": []
+}

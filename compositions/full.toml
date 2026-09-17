@@ -1,0 +1,13 @@
+# Full Hermes-style composition. Plugin ids are added as subsystems are extracted.
+# This file is composition data, not kernel code. Empty until a subsystem has a
+# real plugin owner; do not list legacy modules that still live in the monolith.
+[plugins]
+enabled = [
+  "hermes.persistence",
+  "hermes.tools.core",
+  "hermes.policy.workspace",
+  "hermes.tools.fs",
+  "hermes.provider.openai-compat",
+  "hermes.agent.runtime",
+  "hermes.interface.stdio",
+]

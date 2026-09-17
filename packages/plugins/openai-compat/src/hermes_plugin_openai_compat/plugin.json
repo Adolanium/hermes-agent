@@ -1,0 +1,9 @@
+{
+  "id": "hermes.provider.openai-compat",
+  "version": "0.1.0",
+  "host_api": 1,
+  "name": "OpenAI-compatible provider",
+  "description": "HTTP client for /v1/chat/completions",
+  "entry": "hermes_plugin_openai_compat:register",
+  "provides": [{"service": "model.provider", "unique": true}]
+}

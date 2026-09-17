@@ -1,0 +1,15 @@
+{
+  "id": "hermes.agent.runtime",
+  "version": "0.1.0",
+  "host_api": 1,
+  "name": "Agent runtime",
+  "description": "Tool-calling conversation loop over public contracts",
+  "entry": "hermes_plugin_agent_runtime:register",
+  "provides": [{"service": "agent.runtime", "unique": true}],
+  "requires": [
+    {"service": "model.provider"},
+    {"service": "tool.registry"},
+    {"service": "persistence.sessions"}
+  ],
+  "depends": []
+}

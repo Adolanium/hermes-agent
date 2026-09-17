@@ -1,0 +1,4 @@
+# Bare host: no application plugins.
+[plugins]
+enabled = []
+include_entry_points = false

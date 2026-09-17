@@ -1,0 +1,9 @@
+{
+  "id": "example.alternate-runtime",
+  "version": "1.0.0",
+  "host_api": 1,
+  "name": "Alternate runtime",
+  "description": "Proves the kernel is not coupled to the first-party loop",
+  "entry": "./plugin.py:register",
+  "provides": [{"service": "agent.runtime", "unique": true}]
+}
