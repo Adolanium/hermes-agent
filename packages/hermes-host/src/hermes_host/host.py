@@ -11,6 +11,7 @@ from hermes_host.config import HostConfig
 from hermes_host.context import HostContext
 from hermes_host.discovery import discover_metadata
 from hermes_host.errors import CapabilityError, CompositionError, PluginError
+from hermes_host.commands import CommandRegistry
 from hermes_host.events import EventBus
 from hermes_host.loader import load_register
 from hermes_host.metadata import PluginMetadata
@@ -30,6 +31,7 @@ class Host:
         self._composition: Composition | None = None
         self._registry = ServiceRegistry()
         self._events = EventBus()
+        self.commands = CommandRegistry()
         self._cancelled = threading.Event()
         self._started: list[str] = []
         self._contexts: dict[str, HostContext] = {}
@@ -78,6 +80,7 @@ class Host:
             errors = self._registry.run_cleanups()
             for plugin_id in reversed(self._started):
                 self._events.drop_plugin(plugin_id)
+                self.commands.drop_plugin(plugin_id)
             self._contexts.clear()
             self._started = []
             self._running = False
@@ -118,6 +121,7 @@ class Host:
             settings=self.config.plugin_settings.get(meta.id, {}),
             registry=self._registry,
             events=self._events,
+            commands=self.commands,
             cancelled=self._cancelled,
             policy=policy,
             allowed_service_owners=composition.service_owners,
@@ -149,6 +153,7 @@ class Host:
         for plugin_id in reversed(plugin_ids):
             errors = self._registry.run_cleanups(plugin_id=plugin_id)
             self._events.drop_plugin(plugin_id)
+            self.commands.drop_plugin(plugin_id)
             self._contexts.pop(plugin_id, None)
             for message in errors:
                 logger.warning("rollback cleanup error: %s", message)

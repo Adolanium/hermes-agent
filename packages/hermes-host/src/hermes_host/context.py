@@ -7,6 +7,8 @@ import threading
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
+from hermes_host.commands import BUILTIN_COMMANDS
+from hermes_host.errors import PluginError
 from hermes_host.metadata import PluginMetadata
 from hermes_host.policy import FailClosedPolicy, PrivilegePolicy
 
@@ -23,6 +25,7 @@ class HostContext:
         settings: Mapping[str, Any],
         registry: Any,
         events: Any,
+        commands: Any,
         cancelled: threading.Event,
         policy: PrivilegePolicy,
         allowed_service_owners: Mapping[str, tuple[str, ...]],
@@ -34,6 +37,7 @@ class HostContext:
         self._settings = dict(settings)
         self._registry = registry
         self._events = events
+        self._commands = commands
         self._cancelled = cancelled
         self._policy = policy
         self._allowed_service_owners = allowed_service_owners
@@ -90,6 +94,13 @@ class HostContext:
         if not callable(callback):
             raise TypeError("on_stop callback must be callable")
         self._registry.add_cleanup(self.plugin_id, callback)
+
+    def register_command(self, name: str, handler: Callable[[list[str]], int], *, help: str = "") -> None:
+        """Register a host CLI verb. Builtins (status/init/plugins/start/run) are reserved."""
+        if name in BUILTIN_COMMANDS:
+            raise PluginError(f"command {name!r} is reserved by the host")
+        self._commands.register(name, handler, plugin_id=self.plugin_id, help=help)
+        self._registry.add_cleanup(self.plugin_id, lambda: self._commands.drop_plugin(self.plugin_id))
 
     def subscribe(self, event: str, handler: Callable[[str, dict[str, Any]], None]) -> None:
         self._events.subscribe(self.plugin_id, event, handler)

@@ -99,6 +99,13 @@ def write_host_config(config: HostConfig) -> Path:
     else:
         lines.append("# \"model.provider\" = \"hermes.provider.openai-compat\"")
     lines.append("")
+    if config.plugin_settings:
+        for plugin_id, body in sorted(config.plugin_settings.items()):
+            lines.append(f"[plugins.settings.{_toml_str(plugin_id)}]")
+            if isinstance(body, dict):
+                for key, value in body.items():
+                    lines.append(f"{key} = {_toml_encode(value)}")
+            lines.append("")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return path
 
@@ -145,3 +152,13 @@ def _toml_str(value: str) -> str:
 
 def _toml_array(values) -> str:
     return "[" + ", ".join(_toml_str(str(v)) for v in values) + "]"
+
+
+def _toml_encode(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return str(value)
+    if isinstance(value, list):
+        return _toml_array(value)
+    return _toml_str(str(value))

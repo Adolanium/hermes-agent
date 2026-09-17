@@ -13,4 +13,16 @@ class StdioInterface:
 
 
 def register(ctx) -> None:
-    ctx.register_service("interface.stdio", StdioInterface(ctx))
+    interface = StdioInterface(ctx)
+    ctx.register_service("interface.stdio", interface)
+
+    def query(argv: list[str]) -> int:
+        text = " ".join(argv).strip()
+        if not text:
+            print("usage: hermes-host --home <dir> query <text>")
+            return 2
+        result = interface.run_text(text)
+        print(result.text)
+        return 1 if result.error else 0
+
+    ctx.register_command("query", query, help="Run one agent turn on stdout")

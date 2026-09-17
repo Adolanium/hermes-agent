@@ -1,0 +1,9 @@
+{
+  "id": "hermes.persistence.sqlite",
+  "version": "0.1.0",
+  "host_api": 1,
+  "name": "SQLite session persistence",
+  "description": "stdlib sqlite3 session store; replace hermes.persistence via [services]",
+  "entry": "hermes_plugin_persistence_sqlite:register",
+  "provides": [{"service": "persistence.sessions", "unique": true}]
+}

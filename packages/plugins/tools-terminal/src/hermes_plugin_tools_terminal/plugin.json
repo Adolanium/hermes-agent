@@ -1,0 +1,13 @@
+{
+  "id": "hermes.tools.terminal",
+  "version": "0.1.0",
+  "host_api": 1,
+  "name": "Terminal tool",
+  "description": "Run a subprocess whose cwd is authorized by policy.privilege",
+  "entry": "hermes_plugin_tools_terminal:register",
+  "requires": [
+    {"service": "tool.registry"},
+    {"service": "policy.privilege"}
+  ],
+  "provides": [{"service": "tool.terminal", "unique": false}]
+}

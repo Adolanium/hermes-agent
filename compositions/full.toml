@@ -7,7 +7,12 @@ enabled = [
   "hermes.tools.core",
   "hermes.policy.workspace",
   "hermes.tools.fs",
+  "hermes.tools.terminal",
+  "hermes.persistence.sqlite",
   "hermes.provider.openai-compat",
   "hermes.agent.runtime",
   "hermes.interface.stdio",
 ]
+
+[services]
+"persistence.sessions" = "hermes.persistence.sqlite"

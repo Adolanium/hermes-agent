@@ -8,13 +8,13 @@ Baseline (commit `5cc81773b2`): ~1693 production Python files / ~608k lines in a
 | Agent loop | `run_agent.py`, `agent/turn_*.py` | `hermes.agent.runtime` | **slice implemented** (new loop). Old loop still in tree. |
 | OpenAI-compat HTTP | `agent` + `openai` core dep | `hermes.provider.openai-compat` | **slice implemented** |
 | Tool registry + echo | `tools/registry.py`, `model_tools.py` | `hermes.tools.core` | **slice implemented** (echo only) |
-| Session persistence | `hermes_state*.py` | `hermes.persistence` | **slice implemented** (JSON, not SQLite) |
+| Session persistence | `hermes_state*.py` | `hermes.persistence` (JSON) / `hermes.persistence.sqlite` | **slice implemented** (not the production SessionDB) |
 | Stdio interface | `cli.py` / `hermes_cli` | `hermes.interface.stdio` | **slice implemented** |
 | File tools | `tools/file_*.py` | `hermes.tools.fs` | **slice implemented** (UTF-8 read/write + workspace policy; not the full tool surface) |
 | Workspace policy | `tools/approval*.py` / path guards | `hermes.policy.workspace` | **slice implemented** (path root only; not session approvals) |
-| Terminal tools | `tools/terminal_*.py` | tools plugin | unfinished |
-| Approvals / interactive policy | `tools/approval*.py` | policy plugin | unfinished (kernel fail-closed) |
-| SQLite state | `hermes_state*.py` | persistence plugin | unfinished |
+| Terminal tools | `tools/terminal_*.py` | `hermes.tools.terminal` | **slice implemented** (cwd-gated subprocess; not docker/ssh/modal backends) |
+| Approvals / interactive policy | `tools/approval*.py` | policy plugin | unfinished (kernel fail-closed; workspace policy covers path/cwd) |
+| SQLite state | `hermes_state*.py` | `hermes.persistence.sqlite` | **slice implemented** (sessions table only; not FTS/rewind/profiles) |
 | Memory providers | `plugins/memory/` | keep as plugins | unfinished (not on Zero host) |
 | Model providers (40+) | `plugins/model-providers/` | provider plugins | unfinished |
 | Messaging gateway | `gateway/` | gateway plugin | unfinished |

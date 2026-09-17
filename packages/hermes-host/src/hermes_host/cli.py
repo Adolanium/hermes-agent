@@ -9,29 +9,70 @@ from pathlib import Path
 from typing import Sequence
 
 from hermes_host import HOST_API_VERSION
+from hermes_host.commands import BUILTIN_COMMANDS
 from hermes_host.config import HostConfig, load_host_config, write_host_config
 from hermes_host.errors import CapabilityError, CompositionError, HostError, PluginError
 from hermes_host.host import Host
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    raw = list(argv) if argv is not None else sys.argv[1:]
+    home, remainder = _split_home(raw)
+    if home is None:
+        print("error: --home is required (this host will not use ~/.hermes)", file=sys.stderr)
+        return 2
+    if remainder and remainder[0] not in BUILTIN_COMMANDS and remainder[0] not in {"-h", "--help"}:
+        try:
+            return _cmd_plugin(home, remainder[0], remainder[1:])
+        except (HostError, CapabilityError, CompositionError, PluginError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
     parser = _parser()
     try:
-        args = parser.parse_args(list(argv) if argv is not None else None)
+        args = parser.parse_args(["--home", str(home), *remainder])
     except SystemExit as exc:
         code = exc.code
         if code in (0, None):
             return 0
         return code if isinstance(code, int) else 2
-    if not getattr(args, "home", None):
-        print("error: --home is required (this host will not use ~/.hermes)", file=sys.stderr)
-        return 2
-    home = Path(args.home).expanduser()
     try:
         return args.handler(args, home)
     except (HostError, CapabilityError, CompositionError, PluginError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
+
+
+def _split_home(argv: Sequence[str]) -> tuple[Path | None, list[str]]:
+    home: Path | None = None
+    rest: list[str] = []
+    i = 0
+    items = list(argv)
+    while i < len(items):
+        token = items[i]
+        if token == "--home" and i + 1 < len(items):
+            home = Path(items[i + 1]).expanduser()
+            i += 2
+            continue
+        if token.startswith("--home="):
+            home = Path(token.split("=", 1)[1]).expanduser()
+            i += 1
+            continue
+        rest.append(token)
+        i += 1
+    return home, rest
+
+
+def _cmd_plugin(home: Path, name: str, args: list[str]) -> int:
+    host = _load(home)
+    host.start()
+    try:
+        command = host.commands.get(name)
+        if command is None:
+            available = ", ".join(host.commands.names()) or "(none)"
+            raise CapabilityError(f"command {name!r} is not registered. plugin commands: {available}")
+        return int(command.handler(args) or 0)
+    finally:
+        host.stop()
 
 
 def _parser() -> argparse.ArgumentParser:

@@ -1,0 +1,22 @@
+[project]
+name = "hermes-plugin-persistence-sqlite"
+version = "0.1.0"
+description = "SQLite session persistence for Hermes Zero"
+requires-python = ">=3.11,<3.14"
+dependencies = ["hermes-host", "hermes-agent-sdk"]
+
+[project.entry-points."hermes_host.plugins"]
+"hermes.persistence.sqlite" = "hermes_plugin_persistence_sqlite/plugin.json"
+
+[build-system]
+requires = ["setuptools==83.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+hermes_plugin_persistence_sqlite = ["plugin.json"]
