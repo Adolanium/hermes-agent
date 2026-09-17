@@ -431,7 +431,9 @@ extract, not to regex around it.
 | `cli.py`, `hermes_cli/`, `main.py` | `hermes_cli/AGENTS.md` | CLI mixins, `_SLASH_DISPATCH`, slash registry, config system + loaders, skins, `hermes update` pipeline, profiles / multiplex |
 | `gateway/` | `gateway/AGENTS.md` | Adapters, two message guards, streaming contract, background notifications, gateway vs desktop lifecycle, token locks, scoped secrets |
 | `tools/`, `toolsets.py`, `model_tools.py` | `tools/AGENTS.md` | Adding tools, registry, toolsets, delegation, cross-tool references, backends |
-| `plugins/`, `hermes_cli/plugins*.py` | `plugins/AGENTS.md` | Plugin kinds, native compat contract, in-tree policy, Sep-2026 compat window |
+| `packages/hermes-host/` | `packages/hermes-host/AGENTS.md` | Hermes Zero kernel. No application imports. Zero plugins enabled by default |
+| `packages/hermes-agent-sdk/`, `packages/plugins/` | `packages/hermes-host/AGENTS.md` | Domain contracts and first-party Zero plugins; they must not be imported by the kernel |
+| `plugins/`, `hermes_cli/plugins*.py` | `plugins/AGENTS.md` | Legacy PluginManager (still in-tree until consumers extract). Do not grow it; new work targets `hermes-host` |
 | `tui_gateway/`, `ui-tui/` | `tui_gateway/AGENTS.md` | Process model, JSON-RPC transport, key surfaces, slash flow, dev commands |
 | `web/`, `hermes_cli/web_routers/` | `web/AGENTS.md` | Dashboard embeds the real TUI; what React may and may not rebuild |
 | `apps/desktop/` | `apps/desktop/AGENTS.md`, `apps/desktop/src/AGENTS.md` | Desktop judgment guide; `serve` backend, slash palette curation, Bot Mode canonical chat |

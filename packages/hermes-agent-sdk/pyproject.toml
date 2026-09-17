@@ -1,0 +1,18 @@
+[project]
+name = "hermes-agent-sdk"
+version = "0.1.0"
+description = "Optional domain contracts for Hermes Zero agent/provider/tool plugins"
+requires-python = ">=3.11,<3.14"
+authors = [{ name = "Nous Research" }]
+license = "MIT"
+dependencies = []
+
+[build-system]
+requires = ["setuptools==83.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
