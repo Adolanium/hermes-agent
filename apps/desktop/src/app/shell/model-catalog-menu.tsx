@@ -33,7 +33,7 @@ import type { HermesGateway } from '@/hermes'
 import { useI18n } from '@/i18n'
 import { isSubmitEnter } from '@/lib/ime'
 import { catalogProviderMatches, modelOptionsQueryKey, requestModelOptions } from '@/lib/model-options'
-import { displayModelName, modelDisplayParts } from '@/lib/model-status-label'
+import { ambiguousModelIds, displayModelName, modelBaseId, modelDisplayParts } from '@/lib/model-status-label'
 import { reasoningEffortLabel } from '@/lib/reasoning-effort'
 import { foldIncludes, normalize } from '@/lib/text'
 import { cn } from '@/lib/utils'
@@ -521,6 +521,7 @@ export function ModelCatalogMenu({
             // Collapsed when the user stored it (and not while searching, which
             // spans every model regardless of collapse state).
             const collapsed = collapsedProviders.includes(slug) && !search
+            const ambiguousIds = ambiguousModelIds(group.families.map(family => family.id))
 
             return (
               <DropdownMenuGroup className="py-0.5" key={slug}>
@@ -552,7 +553,12 @@ export function ModelCatalogMenu({
                         : null
 
                     const isCurrent = activeId !== null
-                    const { name, tag } = modelDisplayParts(family.id)
+                    const parts = modelDisplayParts(family.id)
+
+                    const { name, tag } = ambiguousIds.has(family.id)
+                      ? { name: modelBaseId(family.id), tag: '' }
+                      : parts
+
                     const caps = group.provider.capabilities?.[family.id]
 
                     // Managed local model loading into memory right now:

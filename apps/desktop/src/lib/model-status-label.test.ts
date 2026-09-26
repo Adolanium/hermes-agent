@@ -1,8 +1,20 @@
 import { describe, expect, it } from 'vitest'
 
-import { currentPickerSelection, displayModelName, formatModelPillLabel, modelDisplayParts } from './model-status-label'
+import {
+  ambiguousModelIds,
+  currentPickerSelection,
+  displayModelName,
+  formatModelPillLabel,
+  modelDisplayParts
+} from './model-status-label'
 
 describe('model-status-label', () => {
+  it('flags ids that would share a display name and tag', () => {
+    const ids = ['deepseek-flash', 'deepseek-v4.1-flash', 'deepseek-v4-pro', 'claude-opus-4.8', 'claude-opus-4.8-fast']
+
+    expect([...ambiguousModelIds(ids)]).toEqual(['deepseek-flash', 'deepseek-v4.1-flash'])
+  })
+
   it('strips trailing date-pin snapshots and dots hyphenated Anthropic versions', () => {
     expect(displayModelName('claude-opus-4-5-20251101')).toBe('Opus 4.5')
     expect(displayModelName('anthropic/claude-haiku-4-5-20251001')).toBe('Haiku 4.5')

@@ -174,6 +174,25 @@ function renderMenu(current: Partial<ModelMenuController['current']> = {}) {
 // to whichever surface mounted it. If a host had to opt in, the composer and
 // the kanban board would end up disagreeing about what "my models" means —
 // which is exactly the drift extracting this component was meant to prevent.
+describe('rows that share a display name', () => {
+  it('names each by its model id so they can be told apart', async () => {
+    getGlobalModelOptions.mockResolvedValue({
+      providers: [
+        {
+          models: ['deepseek-flash', 'deepseek-v4.1-flash', 'deepseek-v4-pro'],
+          name: 'OpenCode Go',
+          slug: 'opencode-go'
+        }
+      ]
+    })
+    renderMenu({ model: 'deepseek-v4-pro', provider: 'opencode-go' })
+
+    expect(await screen.findByText('deepseek-flash')).toBeTruthy()
+    expect(screen.getByText('deepseek-v4.1-flash')).toBeTruthy()
+    expect(screen.queryByText('deepseek-v4-pro')).toBeNull()
+  })
+})
+
 describe('the catalog owns model curation', () => {
   it('honours the stored Edit Models shortlist', async () => {
     setVisibleModels(new Set([modelVisibilityKey('google', 'gemini-2.5-flash')]))

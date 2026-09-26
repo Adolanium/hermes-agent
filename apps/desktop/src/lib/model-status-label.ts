@@ -144,6 +144,20 @@ export function modelDisplayParts(model: string): { name: string; tag: string } 
   return { name: prettifyBase(base) || model.trim() || 'No model', tag }
 }
 
+/** Ids whose display name and tag match another id in the same list, so a
+ *  picker can tell them apart by their raw id. */
+export function ambiguousModelIds(models: readonly string[]): Set<string> {
+  const byLabel = new Map<string, string[]>()
+
+  for (const model of models) {
+    const { name, tag } = modelDisplayParts(model)
+    const key = `${name.toLowerCase()}\u0000${tag.toLowerCase()}`
+    byLabel.set(key, [...(byLabel.get(key) ?? []), model])
+  }
+
+  return new Set([...byLabel.values()].filter(ids => ids.length > 1).flat())
+}
+
 /** Friendly one-line model name for menus and the status bar. */
 export function displayModelName(model: string): string {
   return modelDisplayParts(model).name
