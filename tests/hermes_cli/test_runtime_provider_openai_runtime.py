@@ -106,3 +106,38 @@ def test_bare_custom_explicit_launch_key_wins_over_custom_pool(monkeypatch):
     resolved = _resolve_openrouter_runtime(requested_provider="custom", explicit_api_key="sk-launch-explicit",
                                            explicit_base_url="http://127.0.0.1:9/v1")
     assert resolved["api_key"] == "sk-launch-explicit"
+
+
+# ── #125005: ``model.provider: openai`` honours model.base_url and model.key_env ──────────────────
+
+def _write_openai_proxy_config(tmp_path, monkeypatch, extra: str = ""):
+    from hermes_cli import config as _cfg
+
+    hermes_home = tmp_path / "hermes"
+    hermes_home.mkdir()
+    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+    (hermes_home / "config.yaml").write_text(
+        "model:\n  provider: openai\n  default: gpt-x\n"
+        "  base_url: https://proxy.example/v1\n  key_env: PROXY_KEY\n" + extra)
+    _cfg._LOAD_CONFIG_CACHE.clear()
+    _cfg._RAW_CONFIG_CACHE.clear()
+
+
+@pytest.mark.parametrize("stale_env_base", [None, "https://stale.example/v1"])
+def test_openai_main_model_runtime_and_discovery_use_the_configured_endpoint(tmp_path, monkeypatch, stale_env_base):
+    """Inference and model discovery hit the SAME endpoint, the configured one, with the
+    ``model.key_env`` key, whether or not a stale OPENAI_BASE_URL is exported."""
+    from hermes_cli import models
+
+    _write_openai_proxy_config(tmp_path, monkeypatch)
+    monkeypatch.setenv("PROXY_KEY", "sk-proxy")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai")
+    if stale_env_base:
+        monkeypatch.setenv("OPENAI_BASE_URL", stale_env_base)
+    else:
+        monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+
+    runtime = rp.resolve_runtime_provider()
+
+    assert models._openai_discovery_base_url("openai") == runtime["base_url"] == "https://proxy.example/v1"
+    assert runtime["api_key"] == "sk-proxy"
