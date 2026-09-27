@@ -820,6 +820,9 @@ class HermesACPAgent(SlashCommandsMixin, acp.Agent):
         user_text = _extract_text(prompt).strip()
         user_content = _content_blocks_to_openai_user_content(prompt)
         text_only_prompt = all(isinstance(block, TextContentBlock) for block in prompt)
+        # A resource-only prompt has no text blocks, but its inlined file body is the turn's text.
+        if not user_text and isinstance(user_content, str):
+            user_text = user_content.strip()
         if not user_text and not (isinstance(user_content, list) and user_content):
             return PromptResponse(stop_reason="end_turn")
 

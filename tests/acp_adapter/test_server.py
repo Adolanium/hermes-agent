@@ -11,14 +11,17 @@ import acp
 from acp.agent.router import build_agent_router
 from acp.schema import (
     AuthenticateResponse,
+    EmbeddedResourceContentBlock,
     InitializeResponse,
     PromptResponse,
+    ResourceContentBlock,
     ResumeSessionResponse,
     SessionModelState,
     SessionModeState,
     SetSessionConfigOptionResponse,
     SessionInfo,
     TextContentBlock,
+    TextResourceContents,
     ToolCallProgress,
     ToolCallStart,
     UsageUpdate,
@@ -400,6 +403,35 @@ class TestPrompt:
         )
 
         assert captured.get("child") == resp.session_id
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("kind", ["resource_link", "embedded_resource"])
+    async def test_resource_only_prompt_runs_a_turn_with_the_file_body(self, agent, mock_manager, tmp_path, kind):
+        """An @-file sent with no typed text still reaches the model instead of ending the turn silently."""
+        attached = tmp_path / "notes.md"
+        attached.write_text("attached file body", encoding="utf-8")
+        if kind == "resource_link":
+            block = ResourceContentBlock(type="resource_link", name="notes.md", uri=attached.as_uri())
+        else:
+            block = EmbeddedResourceContentBlock(
+                type="resource",
+                resource=TextResourceContents(uri=attached.as_uri(), text="attached file body"),
+            )
+        resp = await agent.new_session(cwd=".")
+        state = mock_manager.get_session(resp.session_id)
+        state.agent.run_conversation = MagicMock(return_value={"final_response": "done", "messages": []})
+        state.agent.model = "test-model"
+        state.agent.provider = "openrouter"
+        mock_conn = MagicMock(spec=acp.Client)
+        mock_conn.session_update = AsyncMock()
+        agent._conn = mock_conn
+
+        await agent.prompt(prompt=[block], session_id=resp.session_id)
+
+        state.agent.run_conversation.assert_called_once()
+        kwargs = state.agent.run_conversation.call_args.kwargs
+        assert "attached file body" in kwargs["user_message"]
+        assert "attached file body" in kwargs["persist_user_message"]
 
     @pytest.mark.asyncio
     async def test_empty_messages_list_replaces_stale_history(self, agent, mock_manager):
