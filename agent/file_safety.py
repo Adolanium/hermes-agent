@@ -173,9 +173,10 @@ def get_nt_namespace_error(path: str, *, verb: str = "Access") -> Optional[str]:
     )
 
 
-# Home-root dotfiles that hold plaintext credentials. Writes to them are denied here, and
-# agent/redact.py treats a read of one as secret-bearing output.
-_HOME_CREDENTIAL_BASENAMES = (".netrc", ".pgpass", ".npmrc", ".pypirc", ".git-credentials")
+# Home-root dotfiles that hold plaintext credentials (``_netrc`` is curl's Windows name for
+# ``.netrc``). Writes to them are denied here, and agent/redact.py treats a read of one as
+# secret-bearing output.
+_HOME_CREDENTIAL_BASENAMES = (".netrc", "_netrc", ".pgpass", ".npmrc", ".pypirc", ".git-credentials")
 
 
 def build_write_denied_paths(home: str) -> set[str]:
