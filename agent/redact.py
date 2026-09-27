@@ -9,12 +9,14 @@ import os
 import re
 import shlex
 import threading
+from collections.abc import Iterable
 from urllib.parse import unquote_plus
 
 # Shared with agent/file_safety's read-block list so the two defenses can't
 # drift: a blocked file_tools read that falls back to ``cat`` is still caught.
 from agent.file_safety import _BLOCKED_PROJECT_ENV_BASENAMES as _ENV_FILE_BASENAMES
 from agent.file_safety import _HOME_CREDENTIAL_BASENAMES
+from agent.redact_credential_stores import mask_credential_stores
 
 logger = logging.getLogger(__name__)
 
@@ -243,6 +245,7 @@ _ENV_ASSIGN_LOWER_RE = re.compile(
 # bare secret-word key only at line start (optionally after ``export``), so conversational ``I have
 # password=foo`` mid-sentence is left alone.
 _SECRET_CFG_NAMES = r"(?:api[ _.\-]?key|token|secret|passwd|password|credential|auth)"
+_SECRET_CFG_KEY_RE = re.compile(_SECRET_CFG_NAMES, re.IGNORECASE)
 # Rendered line-number prefix: ``5|line`` (read_file), ``6:line`` (grep -n), ``7-line`` (grep -A/-B/-C
 # context lines) and ``     8\tline`` (cat -n / nl: right-aligned number + TAB). Callers put the ONLY
 # leading ``[ \t]*`` in front of it — stacking a second whitespace run around an optional gutter made
@@ -850,46 +853,6 @@ def _redact_assignments(text: str, *, mask_nonreusable: bool = False) -> str:
     return text
 
 
-# Credential-store lines that have no ``KEY=value`` shape, so the assignment passes miss them:
-# ``.netrc`` (``machine h login u password X``), ``.pgpass`` (``host:port:db:user:X``),
-# ``.git-credentials`` (``https://user:X@host``) and ``.npmrc`` (``//registry/:_authToken=X``).
-# They run only for a source already classified as secret-bearing. Each is shaped so ``.env``,
-# shell rc and config.yaml lines do not match: ``PATH=/a:/b:/c:/d:/e`` carries ``=`` in its first
-# field and a ``# password ...`` comment does not start with a netrc keyword.
-_CREDENTIAL_STORE_RES = (
-    re.compile(
-        rf"(^[ \t]*{_LINE_NUMBER_GUTTER}(?:(?:machine|default|login|account|port)\b[^\n]*?[ \t])?password[ \t]+)(?![=:])(\S+)",
-        re.MULTILINE,
-    ),
-    re.compile(rf"(^[ \t]*{_LINE_NUMBER_GUTTER}(?:[^:\s=#]*:){{4}})(\S[^\r\n]*)", re.MULTILINE),
-    re.compile(r"(://[^:/\s@]+:)([^@\s]+)(?=@)"),
-    re.compile(r"(:_(?:authToken|auth|password)[ \t]*=[ \t]*)(\S+)"),
-)
-# INI ``password = X`` (``.pypirc``): the anchored config pass only accepts ``key=value``
-# with no spaces around ``=``.
-_INI_SPACED_ASSIGN_RE = re.compile(
-    rf"(^[ \t]*{_LINE_NUMBER_GUTTER}[A-Za-z0-9_.\-]*{_SECRET_CFG_NAMES}[A-Za-z0-9_.\-]*(?:[ \t]+=[ \t]*|=[ \t]+))(\S+)",
-    re.IGNORECASE | re.MULTILINE,
-)
-
-
-def _redact_credential_store_lines(text: str, *, mask_nonreusable: bool) -> str:
-    """Mask the value of every credential-store line (see ``_CREDENTIAL_STORE_RES``). Only
-    for ``secret_file`` sources: in a credential store the value is a secret whatever it
-    looks like, so a weak human password is masked too."""
-    mask = _mask_token_nonreusable if mask_nonreusable else _mask_token
-
-    def _sub(m):
-        value = m.group(2)
-        if value == "***" or value.startswith("«redacted"):
-            return m.group(0)
-        return m.group(1) + mask(value)
-
-    for pattern in _CREDENTIAL_STORE_RES:
-        text = pattern.sub(_sub, text)
-    return _INI_SPACED_ASSIGN_RE.sub(_assignment_sub(lambda g: f"{g[0]}{mask(g[1])}", check_keyword=True), text)
-
-
 def _redact_url_credentials(text: str, code_file: bool) -> str:
     """DB connection-string passwords and bare-token URL userinfo (``://`` text only)."""
     def _redact_db(m):
@@ -911,6 +874,7 @@ def _redact_phone(m):
 
 def redact_sensitive_text(text: str, *, force: bool = False, code_file: bool = False,
                           file_read: bool = False, secret_file: bool = False,
+                          source_paths: Iterable[str] = (),
                           redact_url_credentials: bool = False) -> str:
     """Apply all redaction patterns to a block of text.
 
@@ -948,6 +912,11 @@ def redact_sensitive_text(text: str, *, force: bool = False, code_file: bool = F
     fail-open by setting both. Files that are not secret-bearing (any source file, a project's own
     ``config.yaml``) keep the code_file behaviour: ``MAX_TOKENS: 100`` and ``"apiKey": "test"``
     fixtures are untouched.
+
+    ``source_paths`` names the file(s) the text was read from. Each path is classified here, so
+    a caller cannot set ``secret_file`` and forget the file's grammar: a secret-bearing path
+    implies ``secret_file``, and a credential store (``.netrc``, ``.pypirc``, ...) has every
+    stored value masked by its own grammar before any other pass (agent/redact_credential_stores.py).
     """
     if text is None:
         return None
@@ -958,6 +927,13 @@ def redact_sensitive_text(text: str, *, force: bool = False, code_file: bool = F
     text = redact_registered_vault_values(text)
     if not (force or _redact_enabled()):
         return text
+    source_paths = tuple(source_paths)
+    secret_file = secret_file or any(_is_secret_file_arg(path) for path in source_paths)
+    store_formats = {fmt for path in source_paths if (fmt := _credential_store_format(path))}
+    if store_formats:
+        # First, so no generic pass can mask a prefix of a value and hide its remainder.
+        text = mask_credential_stores(text, sorted(store_formats), _mask_token_nonreusable,
+                                      _SECRET_CFG_KEY_RE)
     # ``secret_file`` is authoritative: a caller that classified the source as secret-bearing must not
     # be silently fail-open because another flag (code_file, or file_read implying it) was also set.
     code_file = (code_file or file_read) and not secret_file
@@ -978,8 +954,6 @@ def redact_sensitive_text(text: str, *, force: bool = False, code_file: bool = F
 
     if not code_file:
         text = _redact_assignments(text, mask_nonreusable=file_read)
-    if secret_file:
-        text = _redact_credential_store_lines(text, mask_nonreusable=file_read)
 
     if "uthorization" in text or "UTHORIZATION" in text:  # cheapest gate over every casing
         text = _AUTH_HEADER_RE.sub(lambda m: m.group(1) + (m.group(2) or "") + _mask_token(m.group(3)), text)
@@ -1109,12 +1083,10 @@ def _is_under_hermes_home(path: str) -> bool:
     return False
 
 
-def _is_secret_file_arg(arg: str) -> bool:
-    """``.env``-style, shell rc or credential-store basename (``.netrc``, ``.pgpass``, ...)
-    anywhere; ``credentials`` only under ``.aws`` (the bare name is too generic), and
-    ``config.yaml`` only under a ``.hermes`` directory, ``$HERMES_HOME``, or the resolved
-    Hermes home (never arbitrary YAML). The resolved-home arm is what covers native Windows,
-    where the home directory is ``%LOCALAPPDATA%\\hermes`` and carries no ``.hermes`` segment."""
+def _path_parts(arg: str) -> tuple[list[str], bool, str] | None:
+    """Lowercased path segments past a home / Hermes-home prefix, whether the Hermes-home
+    prefix was present, and the stripped path; None for an unresolvable (``$VAR``) or empty
+    path."""
     path = arg.strip("\"'").replace("\\", "/")
     hermes_home = False
     for prefix in _HERMES_HOME_PREFIXES:
@@ -1127,13 +1099,44 @@ def _is_secret_file_arg(arg: str) -> bool:
             path = path[len(prefix):]
             break
     if "$" in path:
-        return False
+        return None
     parts = [part.lower() for part in path.split("/") if part]
-    if not parts:
+    return (parts, hermes_home, path) if parts else None
+
+
+# Grammar of each credential store, keyed by basename (see agent/redact_credential_stores.py).
+_CREDENTIAL_STORE_FORMATS = {
+    ".netrc": "netrc", ".pgpass": "pgpass", ".pypirc": "ini", ".npmrc": "npmrc",
+    ".git-credentials": "git-credentials",
+}
+
+
+def _store_format(parts: list[str]) -> str | None:
+    if parts[-2:] == [".aws", "credentials"]:
+        return "ini"
+    return _CREDENTIAL_STORE_FORMATS.get(parts[-1])
+
+
+def _credential_store_format(arg: str) -> str | None:
+    """Grammar name of a credential-store path; ``credentials`` counts only under ``.aws``
+    (the bare name is too generic)."""
+    split = _path_parts(arg)
+    return _store_format(split[0]) if split else None
+
+
+def _is_secret_file_arg(arg: str) -> bool:
+    """``.env``-style, shell rc or credential-store (``_credential_store_format``) path
+    anywhere; ``config.yaml`` only under a ``.hermes`` directory, ``$HERMES_HOME``, or the
+    resolved Hermes home (never arbitrary YAML). The resolved-home arm is what covers native
+    Windows, where the home directory is ``%LOCALAPPDATA%\\hermes`` and carries no ``.hermes``
+    segment."""
+    split = _path_parts(arg)
+    if split is None:
         return False
+    parts, hermes_home, path = split
     if parts[-1] in _ENV_FILE_BASENAMES or parts[-1] in _SHELL_RC_BASENAMES:
         return True
-    if parts[-1] in _HOME_CREDENTIAL_BASENAMES or parts[-2:] == [".aws", "credentials"]:
+    if _store_format(parts):
         return True
     # ``config.yaml`` plus the ``config.yaml.good.<stamp>`` / ``.corrupt.<stamp>`` copies Hermes
     # writes under ``backups/config/`` — same contents, same secrets.
@@ -1142,12 +1145,13 @@ def _is_secret_file_arg(arg: str) -> bool:
     return hermes_home or ".hermes" in parts[:-1] or _is_under_hermes_home(path)
 
 
-def _command_reads_secret_file(command: str | None) -> bool:
-    """True if ``command`` reads a secret-bearing file (see ``_is_secret_file_arg``) to
-    stdout. Defense-in-depth, not a boundary: indirect reads (``sudo cat .env``, ``$(cat
-    .env)``, unresolved variable paths) are not detected, matching ``is_env_dump_command``."""
+def _command_secret_file_args(command: str | None) -> list[str]:
+    """Secret-bearing files (see ``_is_secret_file_arg``) that ``command`` reads to stdout.
+    Defense-in-depth, not a boundary: indirect reads (``sudo cat .env``, ``$(cat .env)``,
+    unresolved variable paths) are not detected, matching ``is_env_dump_command``."""
     if not command or not isinstance(command, str):
-        return False
+        return []
+    found = []
     for seg in _command_segments(command):
         tokens = seg.split()  # not shlex: it mangles Windows paths (``C:\Users\...\.env``)
         if not tokens:
@@ -1158,9 +1162,8 @@ def _command_reads_secret_file(command: str | None) -> bool:
         positional = [arg for arg in tokens[1:] if not arg.startswith("-")]
         if reader in _PATTERN_FIRST_COMMANDS:
             positional = positional[1:]
-        if any(_is_secret_file_arg(arg) for arg in positional):
-            return True
-    return False
+        found += [arg for arg in positional if _is_secret_file_arg(arg)]
+    return found
 
 
 def is_env_dump_command(command: str | None) -> bool:
@@ -1207,9 +1210,9 @@ def redact_terminal_output(output: str, command: str | None = None, *, force: bo
     code_file=True avoids false positives on source/config dumps."""
     if not output:
         return output
-    secret_file = _command_reads_secret_file(command)
-    code_file = not (secret_file or is_env_dump_command(command))
-    redacted = redact_sensitive_text(output, force=force, code_file=code_file, secret_file=secret_file)
+    secret_args = _command_secret_file_args(command)
+    code_file = not (secret_args or is_env_dump_command(command))
+    redacted = redact_sensitive_text(output, force=force, code_file=code_file, source_paths=secret_args)
     # Source-preserving output still gets the Python-repr pass on high-confidence
     # diagnostic lines (pytest ``E   `` introspection, final exception lines): that is
     # where {'BRAVE_API_KEY': '…'} leaks, not in source dumps.
