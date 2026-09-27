@@ -1,6 +1,7 @@
 """Tests for acp_adapter.server — HermesACPAgent ACP server."""
 
 import asyncio
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, AsyncMock, patch
@@ -432,6 +433,46 @@ class TestPrompt:
         kwargs = state.agent.run_conversation.call_args.kwargs
         assert "attached file body" in kwargs["user_message"]
         assert "attached file body" in kwargs["persist_user_message"]
+
+    @pytest.mark.asyncio
+    async def test_resource_only_prompt_queued_mid_turn_runs_with_the_file_body(self, agent, mock_manager, tmp_path):
+        """An @-file sent while a turn is running is queued with its body, not dropped or
+        replaced by a placeholder, and reaches the model once the running turn ends."""
+        attached = tmp_path / "notes.md"
+        attached.write_text("attached file body", encoding="utf-8")
+        block = ResourceContentBlock(type="resource_link", name="notes.md", uri=attached.as_uri())
+        resp = await agent.new_session(cwd=".")
+        state = mock_manager.get_session(resp.session_id)
+        started, release = threading.Event(), threading.Event()
+        calls: list[dict] = []
+
+        def _run(**kwargs):
+            calls.append(kwargs)
+            if len(calls) == 1:
+                started.set()
+                release.wait(10)
+            return {"final_response": "done", "messages": []}
+
+        state.agent.run_conversation = _run
+        state.agent.model = "test-model"
+        state.agent.provider = "openrouter"
+        mock_conn = MagicMock(spec=acp.Client)
+        mock_conn.session_update = AsyncMock()
+        agent._conn = mock_conn
+
+        first = asyncio.create_task(
+            agent.prompt(prompt=[TextContentBlock(type="text", text="first")], session_id=resp.session_id)
+        )
+        assert await asyncio.to_thread(started.wait, 10)
+        await agent.prompt(prompt=[block], session_id=resp.session_id)
+        assert len(calls) == 1
+        assert len(state.queued_prompts) == 1
+
+        release.set()
+        await first
+
+        assert len(calls) == 2
+        assert "attached file body" in calls[1]["user_message"]
 
     @pytest.mark.asyncio
     async def test_empty_messages_list_replaces_stale_history(self, agent, mock_manager):
