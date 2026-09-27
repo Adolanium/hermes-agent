@@ -13,6 +13,7 @@ from acp.agent.router import build_agent_router
 from acp.schema import (
     AuthenticateResponse,
     EmbeddedResourceContentBlock,
+    ImageContentBlock,
     InitializeResponse,
     PromptResponse,
     ResourceContentBlock,
@@ -435,12 +436,19 @@ class TestPrompt:
         assert "attached file body" in kwargs["persist_user_message"]
 
     @pytest.mark.asyncio
-    async def test_resource_only_prompt_queued_mid_turn_runs_with_the_file_body(self, agent, mock_manager, tmp_path):
-        """An @-file sent while a turn is running is queued with its body, not dropped or
-        replaced by a placeholder, and reaches the model once the running turn ends."""
-        attached = tmp_path / "notes.md"
-        attached.write_text("attached file body", encoding="utf-8")
-        block = ResourceContentBlock(type="resource_link", name="notes.md", uri=attached.as_uri())
+    @pytest.mark.parametrize("kind", ["resource_link", "image"])
+    async def test_attachment_queued_mid_turn_reaches_the_model_with_a_label_echo(
+        self, agent, mock_manager, tmp_path, kind
+    ):
+        """A prompt carrying an attachment that arrives while a turn is running is queued with
+        its content, reaches the model once the running turn ends, and is echoed to the editor
+        as a label rather than the inlined file body."""
+        if kind == "resource_link":
+            attached = tmp_path / "notes.md"
+            attached.write_text("attached file body", encoding="utf-8")
+            block = ResourceContentBlock(type="resource_link", name="notes.md", uri=attached.as_uri())
+        else:
+            block = ImageContentBlock(type="image", data="aGVsbG8=", mimeType="image/png")
         resp = await agent.new_session(cwd=".")
         state = mock_manager.get_session(resp.session_id)
         started, release = threading.Event(), threading.Event()
@@ -472,7 +480,16 @@ class TestPrompt:
         await first
 
         assert len(calls) == 2
-        assert "attached file body" in calls[1]["user_message"]
+        user_message = calls[1]["user_message"]
+        updates = [call.kwargs.get("update") or call.args[1] for call in mock_conn.session_update.await_args_list]
+        echoes = [update.content.text for update in updates if isinstance(update, UserMessageChunk)]
+        assert len(echoes) == 1
+        if kind == "resource_link":
+            assert "attached file body" in user_message
+            assert "notes.md" in echoes[0] and "attached file body" not in echoes[0]
+        else:
+            assert isinstance(user_message, list)
+            assert any(part.get("type") == "image_url" for part in user_message)
 
     @pytest.mark.asyncio
     async def test_empty_messages_list_replaces_stale_history(self, agent, mock_manager):
