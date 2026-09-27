@@ -16,7 +16,7 @@ from urllib.parse import unquote_plus
 # drift: a blocked file_tools read that falls back to ``cat`` is still caught.
 from agent.file_safety import _BLOCKED_PROJECT_ENV_BASENAMES as _ENV_FILE_BASENAMES
 from agent.file_safety import _HOME_CREDENTIAL_BASENAMES
-from agent.redact_credential_stores import mask_credential_stores
+from agent.redact_credential_stores import Extent, mask_credential_stores
 
 logger = logging.getLogger(__name__)
 
@@ -245,7 +245,6 @@ _ENV_ASSIGN_LOWER_RE = re.compile(
 # bare secret-word key only at line start (optionally after ``export``), so conversational ``I have
 # password=foo`` mid-sentence is left alone.
 _SECRET_CFG_NAMES = r"(?:api[ _.\-]?key|token|secret|passwd|password|credential|auth)"
-_SECRET_CFG_KEY_RE = re.compile(_SECRET_CFG_NAMES, re.IGNORECASE)
 # Rendered line-number prefix: ``5|line`` (read_file), ``6:line`` (grep -n), ``7-line`` (grep -A/-B/-C
 # context lines) and ``     8\tline`` (cat -n / nl: right-aligned number + TAB). Callers put the ONLY
 # leading ``[ \t]*`` in front of it — stacking a second whitespace run around an optional gutter made
@@ -874,7 +873,7 @@ def _redact_phone(m):
 
 def redact_sensitive_text(text: str, *, force: bool = False, code_file: bool = False,
                           file_read: bool = False, secret_file: bool = False,
-                          source_paths: Iterable[str] = (),
+                          source_paths: Iterable[str] = (), source_extent: Extent = "slice",
                           redact_url_credentials: bool = False) -> str:
     """Apply all redaction patterns to a block of text.
 
@@ -917,6 +916,10 @@ def redact_sensitive_text(text: str, *, force: bool = False, code_file: bool = F
     a caller cannot set ``secret_file`` and forget the file's grammar: a secret-bearing path
     implies ``secret_file``, and a credential store (``.netrc``, ``.pypirc``, ...) has every
     stored value masked by its own grammar before any other pass (agent/redact_credential_stores.py).
+    ``source_extent`` says how much of the text those files own: ``"start"`` (from the top of
+    the file), ``"slice"`` (a part that may begin mid-value; the default for a read_file page or
+    search match) or ``"mixed"`` (terminal output that also carries other files or commands, where
+    the grammar must not mask what it cannot tie to a keyword).
     """
     if text is None:
         return None
@@ -932,8 +935,16 @@ def redact_sensitive_text(text: str, *, force: bool = False, code_file: bool = F
     store_formats = {fmt for path in source_paths if (fmt := _credential_store_format(path))}
     if store_formats:
         # First, so no generic pass can mask a prefix of a value and hide its remainder.
+        # Same word-bounded key policy as the assignment passes (``author`` is not ``auth``); in
+        # mixed output the value must also look like a credential, as it must for those passes.
+        if source_extent == "mixed":
+            def secret_option(key, value):
+                return _should_redact_assignment(key, value, check_keyword=True)
+        else:
+            def secret_option(key, value):
+                return _key_has_secret_keyword(key)
         text = mask_credential_stores(text, sorted(store_formats), _mask_token_nonreusable,
-                                      _SECRET_CFG_KEY_RE)
+                                      secret_option, source_extent)
     # ``secret_file`` is authoritative: a caller that classified the source as secret-bearing must not
     # be silently fail-open because another flag (code_file, or file_read implying it) was also set.
     code_file = (code_file or file_read) and not secret_file
@@ -1106,13 +1117,14 @@ def _path_parts(arg: str) -> tuple[list[str], bool, str] | None:
 
 # Grammar of each credential store, keyed by basename (see agent/redact_credential_stores.py).
 _CREDENTIAL_STORE_FORMATS = {
-    ".netrc": "netrc", ".pgpass": "pgpass", ".pypirc": "ini", ".npmrc": "npmrc",
+    ".netrc": "netrc", "_netrc": "netrc", ".pgpass": "pgpass", ".pypirc": "ini", ".npmrc": "npmrc",
     ".git-credentials": "git-credentials",
 }
 
 
 def _store_format(parts: list[str]) -> str | None:
-    if parts[-2:] == [".aws", "credentials"]:
+    # AWS accepts aws_secret_access_key / aws_session_token in ``config`` as well as ``credentials``.
+    if parts[-2:] in ([".aws", "credentials"], [".aws", "config"]):
         return "ini"
     return _CREDENTIAL_STORE_FORMATS.get(parts[-1])
 
@@ -1166,6 +1178,53 @@ def _command_secret_file_args(command: str | None) -> list[str]:
     return found
 
 
+# Commands that may sit downstream of a store read in a pipeline without adding output of their
+# own beyond what they filter from stdin.
+_STORE_FILTER_COMMANDS = _FILE_READ_COMMANDS | {"sort", "uniq", "cut", "tr", "wc", "column", "fold", "rev"}
+# Readers whose output begins at the top of the file.
+_FROM_START_READERS = frozenset({"cat", "type", "bat", "batcat", "less", "more", "nl", "view", "zcat", "head"})
+
+
+def _has_sequence_operator(command: str) -> bool:
+    """Unquoted ``;``, ``&`` (``&&``), ``||`` or a newline: more than one pipeline runs."""
+    quote: str | None = None
+    for i, ch in enumerate(command):
+        if quote:
+            quote = None if ch == quote else quote
+        elif ch in "'\"":
+            quote = ch
+        elif ch in ";&\n" or command.startswith("||", i):
+            return True
+    return False
+
+
+def _command_store_extent(command: str, secret_args: list[str]) -> Extent:
+    """How much of ``command``'s output the one store it reads owns (see redact_sensitive_text's
+    ``source_extent``). Only a single pipeline whose first stage reads exactly that file, and
+    whose later stages only filter stdin, is store-only output; anything else is ``mixed``."""
+    if len(secret_args) != 1 or _has_sequence_operator(command):
+        return "mixed"
+    segments = _command_segments(command)
+    for n, seg in enumerate(segments):
+        try:
+            tokens = shlex.split(seg, posix=False)  # non-POSIX: keeps ``C:\Users\...`` intact
+        except ValueError:
+            tokens = seg.split()
+        reader = tokens[0].rsplit("/", 1)[-1].lower() if tokens else ""
+        if reader not in _STORE_FILTER_COMMANDS:
+            return "mixed"
+        positional = [arg for arg in tokens[1:] if not arg.startswith("-")]
+        if reader in _PATTERN_FIRST_COMMANDS:
+            positional = positional[1:]
+        else:  # a bare number right after a flag is its value (``head -n 5``), not a file
+            positional = [arg for prev, arg in zip(tokens, tokens[1:])
+                          if not arg.startswith("-") and not (arg.isdigit() and prev.startswith("-"))]
+        if len(positional) != (1 if n == 0 else 0):
+            return "mixed"
+    first_reader = segments[0].split()[0].rsplit("/", 1)[-1].lower()
+    return "start" if len(segments) == 1 and first_reader in _FROM_START_READERS else "slice"
+
+
 def is_env_dump_command(command: str | None) -> bool:
     """True if any pipeline/sequence segment starts with an _ENV_DUMP_COMMANDS
     token. Conservative: unrecognized → False (callers fall back to code_file=True)."""
@@ -1212,7 +1271,9 @@ def redact_terminal_output(output: str, command: str | None = None, *, force: bo
         return output
     secret_args = _command_secret_file_args(command)
     code_file = not (secret_args or is_env_dump_command(command))
-    redacted = redact_sensitive_text(output, force=force, code_file=code_file, source_paths=secret_args)
+    extent = _command_store_extent(command, secret_args) if secret_args else "slice"
+    redacted = redact_sensitive_text(output, force=force, code_file=code_file, source_paths=secret_args,
+                                     source_extent=extent)
     # Source-preserving output still gets the Python-repr pass on high-confidence
     # diagnostic lines (pytest ``E   `` introspection, final exception lines): that is
     # where {'BRAVE_API_KEY': '…'} leaks, not in source dumps.

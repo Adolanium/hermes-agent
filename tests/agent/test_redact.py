@@ -1412,7 +1412,9 @@ class TestCredentialStoreReads:
     @pytest.mark.parametrize("path, body", [
         ("~/.aws/credentials", "[default]\naws_access_key_id = AKIAIOSFODNN7EXAMPLE\naws_secret_access_key = {pw}\n"),
         ("C:\\Users\\bob\\.aws\\credentials","[work]\naws_secret_access_key={pw}\n"),
+        ("~/.aws/config", "[profile work]\nregion = us-east-1\naws_session_token = {pw}\n"),
         ("~/.netrc", "machine api.example.com\n  login bob\n  password {pw}\n"),
+        ("C:\\Users\\bob\\_netrc", "machine api.example.com login bob password {pw}\n"),
         ("/home/bob/.netrc", "machine api.example.com login bob password {pw}\n"),
         ("~/.pgpass", "db.example.com:5432:app:bob:{pw}\n"),
         ("~/.npmrc", "//registry.npmjs.org/:_authToken={pw}\n"),
@@ -1466,19 +1468,46 @@ class TestCredentialStoreReads:
         assert not leaks
 
     def test_public_neighbours_comments_and_macros_survive(self):
-        netrc_text = ("# work account\nmachine api.example.com\n  login bob\n  password hunter2weak\n"
+        from agent.redact import redact_terminal_output
+
+        # ``#work`` and ``# work`` are both comments to CPython's netrc and to curl.
+        netrc_text = ("#work\n# work account\nmachine api.example.com\n  login bob\n  password hunter2weak\n"
                       "macdef init\ncd /pub\n\n")
         out = redact_sensitive_text(self._numbered(netrc_text.split("\n")), force=True, file_read=True,
                                     source_paths=("~/.netrc",))
-        for kept in ("1|# work account", "2|machine api.example.com", "3|  login bob", "5|macdef init",
-                     "6|cd /pub"):
+        for kept in ("1|#work", "2|# work account", "3|machine api.example.com", "4|  login bob",
+                     "6|macdef init", "7|cd /pub"):
             assert kept in out
-        assert "4|  password «redacted-secret»" in out
+        assert "5|  password «redacted-secret»" in out
+        assert redact_terminal_output(netrc_text, "cat ~/.netrc", force=True) == netrc_text.replace(
+            "hunter2weak", "«redacted-secret»")
 
+        # Options are secret by the redactor's word-bounded key policy: ``author`` is not ``auth``.
         pypirc = ("[distutils]\nindex-servers =\n    pypi\n    private\n\n[private]\n"
-                  "repository = https://bob:hunter2weak@pkgs.example/\nusername = bob\n; note\n")
+                  "repository = https://bob:hunter2weak@pkgs.example/\nusername = bob\n; note\n"
+                  "author = Bob\nauthority = pkgs.example\n")
         out = redact_sensitive_text(pypirc, force=True, file_read=True, source_paths=("~/.pypirc",))
         assert out == pypirc.replace("hunter2weak", "«redacted-secret»")
+
+    @pytest.mark.parametrize("command, output", [
+        ("cat ~/.netrc app.py", "machine api.example.com\nlogin bob\npassword hunter2weak\n{app}"),
+        ("cat app.py ~/.netrc", "{app}machine api.example.com\nlogin bob\npassword hunter2weak\n"),
+        ("cat ~/.pgpass app.py", "db.example.com:5432:app:bob:hunter2weak\n{app}"),
+        ("cat ~/.pypirc app.py", "[pypi]\nusername = bob\npassword = alpha hunter2weak\n{app}"),
+        ("cat ~/.netrc && cat app.py", "machine a\npassword \"alpha hunter2weak\"\n{app}"),
+        ("grep -rn password ~/.netrc src",
+         "/home/bob/.netrc:3:password hunter2weak\nsrc/app.py:2:{app_line}\n"),
+    ])
+    def test_store_read_alongside_other_output_keeps_that_output(self, command, output):
+        """Terminal output that is not ONLY the store must not have the store's catch-all
+        applied to the other file's lines; the store's own values are still masked."""
+        from agent.redact import redact_terminal_output
+
+        app_lines = ["CANARY_ALPHA_LINE_ONE", "def handler(request):", "    CANARY_BETA_LINE_TWO"]
+        text = output.format(app="".join(f"{line}\n" for line in app_lines), app_line=app_lines[1])
+        out = redact_terminal_output(text, command)
+        assert self.WEAK not in out
+        assert all(line in out for line in app_lines if line in text)
 
     def test_every_credential_basename_has_a_grammar(self):
         from agent.file_safety import _HOME_CREDENTIAL_BASENAMES
@@ -1490,7 +1519,7 @@ class TestCredentialStoreReads:
         from agent.redact import _is_secret_file_arg, redact_terminal_output
 
         # ``credentials`` alone is too generic: only the ``.aws`` parent makes it a store.
-        for path in ("docs/credentials", "~/credentials", "~/.aws/config", "notes/netrc.md"):
+        for path in ("docs/credentials", "~/credentials", "docs/config", "notes/netrc.md"):
             assert not _is_secret_file_arg(path)
             assert redact_terminal_output(f"password = {self.WEAK}\n", f"cat {path}") == f"password = {self.WEAK}\n"
         # The store grammars never run on ordinary secret-file lines.
