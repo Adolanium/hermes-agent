@@ -2279,3 +2279,31 @@ def test_openai_alias_without_base_url_pairs_openai_key_with_openai_base_url(mon
     runtime = rp.resolve_runtime_provider(requested="openai", target_model="gpt-x")
 
     assert (runtime["provider"], runtime["base_url"], runtime["api_key"]) == ("custom", "https://llm-proxy.corp.example/v1", "sk-proxy-issued")
+
+
+@pytest.mark.parametrize("stale_env_base", [None, "https://stale.example/v1"])
+def test_openai_main_model_runtime_and_discovery_use_the_configured_endpoint(tmp_path, monkeypatch, stale_env_base):
+    """``model.provider: openai`` + ``model.base_url``: inference and model discovery hit the SAME endpoint,
+    the configured one, with the ``model.key_env`` key, whether or not a stale OPENAI_BASE_URL is exported."""
+    from hermes_cli import config as _cfg
+    from hermes_cli import models
+
+    hermes_home = tmp_path / "hermes"
+    hermes_home.mkdir()
+    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+    (hermes_home / "config.yaml").write_text(
+        "model:\n  provider: openai\n  default: gpt-x\n"
+        "  base_url: https://proxy.example/v1\n  key_env: PROXY_KEY\n")
+    _cfg._LOAD_CONFIG_CACHE.clear()
+    _cfg._RAW_CONFIG_CACHE.clear()
+    monkeypatch.setenv("PROXY_KEY", "sk-proxy")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai")
+    if stale_env_base:
+        monkeypatch.setenv("OPENAI_BASE_URL", stale_env_base)
+    else:
+        monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+
+    runtime = rp.resolve_runtime_provider()
+
+    assert models._openai_discovery_base_url("openai") == runtime["base_url"] == "https://proxy.example/v1"
+    assert runtime["api_key"] == "sk-proxy"

@@ -1283,8 +1283,12 @@ def _merge_with_models_dev(provider: str, curated: list[str]) -> list[str]:
 
 def _openai_discovery_base_url(provider: str) -> str:
     """OpenAI endpoint for model discovery, mirroring runtime precedence so discovery probes the SAME
-    endpoint inference uses: ``$OPENAI_BASE_URL`` → config ``model.base_url`` (when the configured
-    provider matches) → the canonical default."""
+    endpoint inference uses. The ``openai`` alias shares the runtime's own resolver, and ``openai-api``
+    is ``$OPENAI_BASE_URL`` → config ``model.base_url`` (when the configured provider matches) → the
+    canonical default."""
+    if normalize_provider(provider) == "openai":
+        from hermes_cli.runtime_provider_custom import direct_api_alias_base_url
+        return direct_api_alias_base_url("openai")
     env_raw = os.getenv("OPENAI_BASE_URL", "").strip().rstrip("/")
     if env_raw:
         return env_raw
@@ -1292,7 +1296,7 @@ def _openai_discovery_base_url(provider: str) -> str:
         model_cfg = _get_model_config_dict()
         cfg_provider = str(model_cfg.get("provider") or "").strip().lower()
         same_provider = normalize_provider(provider) == normalize_provider(cfg_provider)
-        if cfg_provider in ("openai", "openai-api") and same_provider:
+        if cfg_provider == "openai-api" and same_provider:
             cfg_url = str(model_cfg.get("base_url") or "").strip().rstrip("/")
             if cfg_url:
                 return cfg_url
