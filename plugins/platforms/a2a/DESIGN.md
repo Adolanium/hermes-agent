@@ -64,7 +64,9 @@ Peers resolved from `config.yaml` → `a2a_agents`, or a direct URL.
   `contextId`, so the agent that answers is the same one serving the user —
   full memory/context, not a clone. The reply returns through `adapter.send()`,
   which fulfils the pending per-**task** `Future` the HTTP request is blocked
-  on (per-context FIFO, so concurrent same-context requests can't cross-talk);
+  on. The final's reply anchor (the task id) picks the task, and the adapter
+  dispatches one turn per context at a time, so the gateway busy queue never
+  folds two same-context tasks into one turn;
   `on_processing_complete` resolves failures/cancellations promptly.
 - **Task store:** every task (including terminal ones, bounded to the last
   500) stays queryable via `tasks/get` / `tasks/list`, and `tasks/subscribe`
