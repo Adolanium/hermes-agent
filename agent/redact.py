@@ -16,7 +16,7 @@ from urllib.parse import unquote_plus
 # drift: a blocked file_tools read that falls back to ``cat`` is still caught.
 from agent.file_safety import _BLOCKED_PROJECT_ENV_BASENAMES as _ENV_FILE_BASENAMES
 from agent.file_safety import _HOME_CREDENTIAL_BASENAMES
-from agent.redact_credential_stores import Extent, mask_credential_stores
+from agent.redact_credential_stores import Extent, StoreSource, mask_credential_stores
 
 logger = logging.getLogger(__name__)
 
@@ -918,8 +918,9 @@ def redact_sensitive_text(text: str, *, force: bool = False, code_file: bool = F
     stored value masked by its own grammar before any other pass (agent/redact_credential_stores.py).
     ``source_extent`` says how much of the text those files own: ``"start"`` (from the top of
     the file), ``"slice"`` (a part that may begin mid-value; the default for a read_file page or
-    search match) or ``"mixed"`` (terminal output that also carries other files or commands, where
-    the grammar must not mask what it cannot tie to a keyword).
+    search match) or ``"mixed"`` (terminal output that also carries other files or commands; the
+    store is then read on this host so its own values can be told from other output, and the
+    output fails closed when it cannot be, see agent/redact_credential_stores.py).
     """
     if text is None:
         return None
@@ -932,19 +933,14 @@ def redact_sensitive_text(text: str, *, force: bool = False, code_file: bool = F
         return text
     source_paths = tuple(source_paths)
     secret_file = secret_file or any(_is_secret_file_arg(path) for path in source_paths)
-    store_formats = {fmt for path in source_paths if (fmt := _credential_store_format(path))}
-    if store_formats:
-        # First, so no generic pass can mask a prefix of a value and hide its remainder.
-        # Same word-bounded key policy as the assignment passes (``author`` is not ``auth``); in
-        # mixed output the value must also look like a credential, as it must for those passes.
-        if source_extent == "mixed":
-            def secret_option(key, value):
-                return _should_redact_assignment(key, value, check_keyword=True)
-        else:
-            def secret_option(key, value):
-                return _key_has_secret_keyword(key)
-        text = mask_credential_stores(text, sorted(store_formats), _mask_token_nonreusable,
-                                      secret_option, source_extent)
+    # Mixed output needs the store's own values to tell a bare value line from another file's.
+    stores = [store for path in source_paths
+              if (store := _credential_store_source(path, read=source_extent == "mixed"))]
+    if stores:
+        # First, so no generic pass can mask a prefix of a value and hide its remainder. Options
+        # are secret by the assignment passes' word-bounded key policy (``author`` is not ``auth``).
+        text = mask_credential_stores(text, stores, _mask_token_nonreusable, _key_has_secret_keyword,
+                                      source_extent)
     # ``secret_file`` is authoritative: a caller that classified the source as secret-bearing must not
     # be silently fail-open because another flag (code_file, or file_read implying it) was also set.
     code_file = (code_file or file_read) and not secret_file
@@ -1134,6 +1130,31 @@ def _credential_store_format(arg: str) -> str | None:
     (the bare name is too generic)."""
     split = _path_parts(arg)
     return _store_format(split[0]) if split else None
+
+
+_STORE_READ_LIMIT = 1 << 20
+
+
+def _read_store_on_host(arg: str) -> str | None:
+    """The store at ``arg`` as this process sees it, or None when it cannot be read. A relative
+    path resolves against the terminal's cwd, which is not known here, so it counts as unreadable."""
+    path = os.path.expandvars(os.path.expanduser(arg.strip("\"'")))
+    if not os.path.isabs(path):
+        return None
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            return fh.read(_STORE_READ_LIMIT)
+    except OSError:
+        return None
+
+
+def _credential_store_source(arg: str, *, read: bool) -> StoreSource | None:
+    split = _path_parts(arg)
+    fmt = _store_format(split[0]) if split else None
+    if fmt is None:
+        return None
+    name = tuple(split[0][-2:]) if split[0][-2:-1] == [".aws"] else (split[0][-1],)
+    return StoreSource(fmt, name, _read_store_on_host(arg) if read else None)
 
 
 def _is_secret_file_arg(arg: str) -> bool:

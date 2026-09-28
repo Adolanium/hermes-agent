@@ -1489,25 +1489,57 @@ class TestCredentialStoreReads:
         out = redact_sensitive_text(pypirc, force=True, file_read=True, source_paths=("~/.pypirc",))
         assert out == pypirc.replace("hunter2weak", "«redacted-secret»")
 
-    @pytest.mark.parametrize("command, output", [
-        ("cat ~/.netrc app.py", "machine api.example.com\nlogin bob\npassword hunter2weak\n{app}"),
-        ("cat app.py ~/.netrc", "{app}machine api.example.com\nlogin bob\npassword hunter2weak\n"),
-        ("cat ~/.pgpass app.py", "db.example.com:5432:app:bob:hunter2weak\n{app}"),
-        ("cat ~/.pypirc app.py", "[pypi]\nusername = bob\npassword = alpha hunter2weak\n{app}"),
-        ("cat ~/.netrc && cat app.py", "machine a\npassword \"alpha hunter2weak\"\n{app}"),
-        ("grep -rn password ~/.netrc src",
-         "/home/bob/.netrc:3:password hunter2weak\nsrc/app.py:2:{app_line}\n"),
+    # ``{store}`` is a real store file, ``{app}`` another file's lines; ``output`` is what the
+    # command prints.
+    @pytest.mark.parametrize("name, body, command, output", [
+        (".netrc", "machine api.example.com\nlogin bob\npassword {pw}\n", "cat {store} app.py", "{body}{app}"),
+        (".netrc", "machine api.example.com\nlogin bob\npassword {pw}\n", "cat app.py {store}", "{app}{body}"),
+        (".pgpass", "db.example.com:5432:app:bob:{pw}\n", "cat {store} app.py", "{body}{app}"),
+        (".pypirc", "[pypi]\nusername = bob\npassword = alpha {pw}\n", "cat {store} app.py", "{body}{app}"),
+        # A value line cut from its keyword: nothing in the text ties it to the store.
+        (".netrc", "machine a\nlogin bob\npassword\n{pw}\n", "tail -n 1 {store} && cat app.py", "{pw}\n{app}"),
+        (".netrc", "machine a\nlogin bob\npassword\n{pw}\n", "sed -n 4p {store} app.py", "{pw}\n{app}"),
+        (".pypirc", "[pypi]\npassword = alpha\n    {pw}\n", "awk 'NR==3' {store} app.py", "    {pw}\n{app}"),
+        # grep lines are attributed by their prefix; another file's hit is never parsed as the store.
+        (".netrc", "machine a\nlogin bob\npassword\n{pw}\n", "grep -rn {pw} {store} src",
+         "{store}:4:{pw}\nsrc/app.py:1:{app_line}\n"),
+        (".netrc", "machine a\npassword\n{pw}\n", "grep -rn password {store} src",
+         "{store}:2:password\nsrc/app.py:1:{app_line}\n"),
     ])
-    def test_store_read_alongside_other_output_keeps_that_output(self, command, output):
-        """Terminal output that is not ONLY the store must not have the store's catch-all
-        applied to the other file's lines; the store's own values are still masked."""
+    def test_store_read_alongside_other_output_keeps_that_output(self, tmp_path, name, body, command, output):
+        """Terminal output that is not ONLY the store: the store's values are masked wherever
+        they appear, and the other file's lines are left intact."""
         from agent.redact import redact_terminal_output
 
-        app_lines = ["CANARY_ALPHA_LINE_ONE", "def handler(request):", "    CANARY_BETA_LINE_TWO"]
-        text = output.format(app="".join(f"{line}\n" for line in app_lines), app_line=app_lines[1])
-        out = redact_terminal_output(text, command)
+        store = tmp_path / name
+        body = body.format(pw=self.WEAK)
+        store.write_text(body, encoding="utf-8", newline="\n")
+        app_lines = ["CANARY_ALPHA_LINE_ONE", "password = fetch()", "    CANARY_BETA_LINE_TWO"]
+        text = output.format(store=store, body=body, pw=self.WEAK, app_line=app_lines[1],
+                             app="".join(f"{line}\n" for line in app_lines))
+        out = redact_terminal_output(text, command.format(store=store, pw=self.WEAK))
         assert self.WEAK not in out
         assert all(line in out for line in app_lines if line in text)
+
+    def test_mixed_output_fails_closed_when_the_store_values_are_unknown(self, tmp_path):
+        """Without the store's values a bare value line cannot be told from other output, so it
+        is masked: the store is not on this host (a remote backend), the host's copy is a
+        different file, or a stored value is too short to mask by value."""
+        from agent.redact import redact_terminal_output
+
+        missing = tmp_path / "remote" / ".netrc"
+        other = tmp_path / "host" / ".netrc"
+        other.parent.mkdir()
+        other.write_text("machine a\npassword\nsomethingElse42\n", encoding="utf-8", newline="\n")
+        for store in (missing, other):
+            out = redact_terminal_output(f"{self.WEAK}\nCANARY\n", f"tail -n 1 {store} && cat app.py")
+            assert self.WEAK not in out
+
+        short = tmp_path / "short" / ".netrc"
+        short.parent.mkdir()
+        short.write_text("machine a\npassword\npw1\n", encoding="utf-8", newline="\n")
+        out = redact_terminal_output("pw1\nCANARY\n", f"tail -n 1 {short} && cat app.py")
+        assert "pw1" not in out
 
     def test_every_credential_basename_has_a_grammar(self):
         from agent.file_safety import _HOME_CREDENTIAL_BASENAMES
