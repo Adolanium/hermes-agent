@@ -293,10 +293,14 @@ class A2AAdapter(BasePlatformAdapter):
         self._profile_sessions: Dict[tuple[str, str, str], str] = {}
         self._profile_session_locks: Dict[tuple[str, str, str], threading.Lock] = {}
         self._profile_session_locks_guard = threading.Lock()
-        # Pending reply futures: task_id -> (context_id, Future). _pending_order keeps per-context
-        # FIFO so adapter.send() — which only knows the context — resolves the oldest task.
+        # Pending reply futures: task_id -> (context_id, Future). send() resolves the task named by
+        # the final's reply anchor (the gateway anchors on the inbound message id == task id).
         self._pending: Dict[str, tuple[str, Future]] = {}
-        self._pending_order: Dict[str, deque[str]] = {}
+        # One dispatched turn per context. The gateway's busy queue merges or replaces queued text
+        # for a session, which would fold two tasks into one turn: one gets the other's answer and
+        # the other never settles. Later tasks wait here until the in-flight one is popped.
+        self._inflight: Dict[str, str] = {}
+        self._queued: Dict[str, deque[tuple[str, MessageEvent]]] = {}
         # Request ownership outlives reply Futures and also covers synchronous profile forwards.
         self._active_tasks: set[str] = set()
         self._pending_lock = threading.Lock()
@@ -348,7 +352,8 @@ class A2AAdapter(BasePlatformAdapter):
             for tid in list(self._pending):
                 self._resolve_locked(tid, protocol.STATE_FAILED, "[agent shutting down]")
             self._pending.clear()
-            self._pending_order.clear()
+            self._inflight.clear()
+            self._queued.clear()
             self._active_tasks.clear()
 
     def _watchdog_loop(self) -> None:
@@ -482,7 +487,6 @@ class A2AAdapter(BasePlatformAdapter):
         with self._pending_lock:
             self._active_tasks.add(task_id)
             self._pending[task_id] = (context_id, fut)
-            self._pending_order.setdefault(context_id, deque()).append(task_id)
         return fut
 
     def _activate_task(self, task_id: str) -> None:
@@ -493,11 +497,38 @@ class A2AAdapter(BasePlatformAdapter):
         with self._pending_lock:
             self._active_tasks.discard(task_id)
             entry = self._pending.pop(task_id, None)
-            order = self._pending_order.get(entry[0]) if entry else None
-            if order and task_id in order:
-                order.remove(task_id)
-            if order is not None and not order:
-                self._pending_order.pop(entry[0], None)
+            nxt = self._advance_context_locked(entry[0]) if entry and self._inflight.get(entry[0]) == task_id else None
+        if nxt is not None:
+            self._dispatch_queued(*nxt)
+
+    def _claim_context(self, context_id: str, task_id: str, event: MessageEvent) -> bool:
+        """True if ``task_id`` may dispatch now; otherwise it waits behind the in-flight task."""
+        with self._pending_lock:
+            if context_id in self._inflight:
+                self._queued.setdefault(context_id, deque()).append((task_id, event))
+                return False
+            self._inflight[context_id] = task_id
+            return True
+
+    def _advance_context_locked(self, context_id: str) -> Optional[tuple[str, MessageEvent]]:
+        """Hand the context to the next queued task still waiting (cancelled ones were popped)."""
+        queue = self._queued.get(context_id)
+        while queue:
+            task_id, event = queue.popleft()
+            entry = self._pending.get(task_id)
+            if entry and not entry[1].done():
+                self._inflight[context_id] = task_id
+                return task_id, event
+        self._queued.pop(context_id, None)
+        self._inflight.pop(context_id, None)
+        return None
+
+    def _dispatch_queued(self, task_id: str, event: MessageEvent) -> None:
+        try:
+            asyncio.run_coroutine_threadsafe(self.handle_message(event), self._loop)
+        except Exception as e:
+            # Its waiter finalizes the failure and pops it, which hands the context on.
+            self._resolve_task(task_id, protocol.STATE_FAILED, security.redact_outbound(f"Dispatch failed: {e}"))
 
     def _resolve_locked(self, task_id: str, state: str, text: str) -> bool:
         entry = self._pending.get(task_id)
@@ -510,9 +541,14 @@ class A2AAdapter(BasePlatformAdapter):
         with self._pending_lock:
             return self._resolve_locked(task_id, state, text)
 
-    def _resolve_oldest_for_context(self, context_id: str, state: str, text: str) -> bool:
+    def _resolve_final(self, context_id: str, anchor: Optional[str], text: str) -> bool:
+        """Resolve the task that owns a final: its anchor, else the context's in-flight task. A
+        late final anchored on a finished task settles nothing, so it can't answer a sibling."""
         with self._pending_lock:
-            return any(self._resolve_locked(tid, state, text) for tid in self._pending_order.get(context_id, ()))
+            task_id = anchor or self._inflight.get(context_id)
+            entry = self._pending.get(task_id or "")
+            return bool(entry and entry[0] == context_id
+                        and self._resolve_locked(task_id, protocol.STATE_COMPLETED, text))
 
     def _scope_for_agent(self, agent: Optional[dict]) -> tuple[str, str]:
         return tuple(str((agent or self._agents[""]).get(k) or "") for k in ("slug", "tenant"))
@@ -568,7 +604,8 @@ class A2AAdapter(BasePlatformAdapter):
         event = MessageEvent(text=framed, message_type=MessageType.TEXT, message_id=task_id,
                              source=self.build_source(chat_id=context_id, chat_name=f"a2a:{peer}", chat_type="dm", user_id=peer, user_name=peer))
         try:
-            asyncio.run_coroutine_threadsafe(self.handle_message(event), self._loop)
+            if self._claim_context(context_id, task_id, event):
+                asyncio.run_coroutine_threadsafe(self.handle_message(event), self._loop)
         except Exception as e:
             msg = security.redact_outbound(f"Dispatch failed: {e}")
             try:
@@ -902,13 +939,15 @@ class A2AAdapter(BasePlatformAdapter):
         logger.debug("A2A: push notification sent for task %s", task_id)
 
     async def send(self, chat_id: str, content: str, reply_to: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None):
-        """Fulfil the oldest pending reply Future for this context (``chat_id`` = A2A context id).
+        """Fulfil the reply Future of the task this final belongs to (``chat_id`` = A2A context id).
         Only sends carrying ``metadata['notify']`` (the base adapter's final-reply marker) satisfy
         the caller; progress/status/preview sends must not."""
+        # Stream-consumer finals carry their anchor in metadata instead of ``reply_to``.
+        anchor = str(reply_to or (metadata or {}).get("reply_to_message_id") or "") or None
         if not (metadata or {}).get("notify"):
             logger.debug("A2A: ignoring non-final send for context %s", chat_id)
-        elif not self._resolve_oldest_for_context(chat_id, protocol.STATE_COMPLETED, content or ""):
-            logger.debug("A2A: send() for context %s had no pending waiter", chat_id)  # late chunk / out-of-band
+        elif not self._resolve_final(chat_id, anchor, content or ""):
+            logger.info("A2A: final for context %s (anchor %s) matched no pending task", chat_id, anchor)
         return SendResult(success=True, message_id=str(int(time.time() * 1000)))
 
     async def send_typing(self, chat_id: str, metadata=None) -> None:

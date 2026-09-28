@@ -483,3 +483,75 @@ def test_background_completion_preserves_profile(tmp_path, monkeypatch, routed):
     finally:
         release.set()
         reset_hermes_home_override(token)
+
+
+def _rpc(port, method, params):
+    import json
+    import urllib.request
+    req = urllib.request.Request(f"http://127.0.0.1:{port}/", json.dumps(
+        {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode(), {"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=3) as r:
+        return json.load(r).get("result")
+
+
+def test_same_context_tasks_each_get_their_own_turn(tmp_path, monkeypatch):
+    """Three detached tasks in one context, real handle_message: the gateway busy queue must not
+    fold two of them into one turn (one answered with the other's reply, the other stuck)."""
+    import asyncio
+    import socket
+
+    from gateway.config import PlatformConfig
+    import agent.oneshot_footprint as footprint
+
+    for k in ("A2A_BEARER_TOKEN", "A2A_PEER_TOKENS"):
+        monkeypatch.delenv(k, raising=False)
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    monkeypatch.setenv("A2A_PORT", str(port))
+    monkeypatch.setattr(footprint, "is_single_query_session", lambda: False)
+    a = A2AAdapter(PlatformConfig(enabled=True, extra={"port": port}))
+
+    async def model(event):
+        job = event.text.strip().rsplit("\n", 1)[-1]
+        await asyncio.sleep(1.0 if job == "job-0" else 0.2)  # later tasks arrive while job-0 runs
+        return "REPLY " + job
+    a._message_handler = model
+
+    def body():
+        tids = []
+        for i in range(3):
+            tids.append(_rpc(port, "SendMessage", {
+                "message": {"messageId": f"m-{i}", "role": "ROLE_USER", "contextId": "ctx", "parts": [{"text": f"job-{i}"}]},
+                "configuration": {"returnImmediately": True}})["task"]["id"])
+        deadline = time.time() + 15
+        while True:
+            tasks = [_rpc(port, "GetTask", {"id": t}) for t in tids]
+            if time.time() > deadline or all(t["status"]["state"] in protocol.TERMINAL_STATES for t in tasks):
+                return tasks
+            time.sleep(0.5)
+
+    async def main():
+        assert await a.connect()
+        try:
+            return await asyncio.to_thread(body)
+        finally:
+            await a.disconnect()
+
+    tasks = asyncio.run(main())
+    assert [(t["status"]["state"], protocol.extract_text(t["artifacts"][0]) if t.get("artifacts") else None)
+            for t in tasks] == [(protocol.STATE_COMPLETED, f"REPLY job-{i}") for i in range(3)]
+
+
+def test_late_anchored_final_never_answers_a_sibling():
+    import asyncio
+
+    a = _bare_adapter()
+    first = a._add_pending("task-1", "ctx")
+    second = a._add_pending("task-2", "ctx")
+    first.set_result((protocol.STATE_FAILED, "[agent did not reply in time]"))
+
+    asyncio.run(a.send("ctx", "late answer for task 1", reply_to="task-1", metadata={"notify": True}))
+    assert not second.done()
+    asyncio.run(a.send("ctx", "answer 2", metadata={"notify": True, "reply_to_message_id": "task-2"}))
+    assert second.result(timeout=0) == (protocol.STATE_COMPLETED, "answer 2")
