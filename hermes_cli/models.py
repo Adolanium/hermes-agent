@@ -1426,10 +1426,14 @@ def _anthropic_catalog(normalized: str, force_refresh: bool) -> list[str]:
 
 
 def _openai_catalog(normalized: str, force_refresh: bool) -> Optional[list[str]]:
-    api_key = os.getenv("OPENAI_API_KEY", "").strip()
+    base = _openai_discovery_base_url(normalized)
+    from hermes_cli.runtime_provider_custom import openai_alias_model_endpoint_key
+    # model.base_url takes model.key_env. An empty one does not fall through to
+    # OPENAI_API_KEY, which would be posted to a host it was not issued for.
+    locked, model_key = openai_alias_model_endpoint_key(base)
+    api_key = model_key if locked else os.getenv("OPENAI_API_KEY", "").strip()
     if not api_key:
         return None
-    base = _openai_discovery_base_url(normalized)
     # Custom OpenAI-compatible endpoints serve a small curated catalog — use it verbatim. Official
     # OpenAI hosts (canonical and data-residency regional) return 120+ embeddings/whisper/tts/…
     # entries, so intersect with the curated agentic catalog so ``/model`` matches ``hermes model``.

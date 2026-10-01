@@ -66,6 +66,23 @@ def _model_cfg_key_env_for(model_cfg: Dict[str, Any], base_url: str) -> str:
     return _key_env_secret(model_cfg, "model")
 
 
+def openai_alias_model_endpoint_key(base_url: str) -> Tuple[bool, str]:
+    """``(locked, key)`` for an OpenAI alias endpoint.
+
+    Locked when ``base_url`` is the configured ``model.base_url`` of ``provider: openai``.
+    The key is then ``model.key_env`` only, possibly empty. Callers must not substitute
+    ``OPENAI_API_KEY``, which was not issued for that host. Unlocked means this is
+    ``OPENAI_BASE_URL`` or the public host, and the caller keeps its own key.
+    """
+    model_cfg = _rp()._get_model_config() or {}
+    if _clean(model_cfg.get("provider")).lower() != "openai":
+        return False, ""
+    cfg_base_url = _clean(model_cfg.get("base_url")).rstrip("/")
+    if not cfg_base_url or cfg_base_url != _clean(base_url).rstrip("/"):
+        return False, ""
+    return True, _model_cfg_key_env_for(model_cfg, base_url)
+
+
 def _entry_url(entry: Dict[str, Any]) -> str:
     return entry.get("api") or entry.get("url") or entry.get("base_url") or ""
 
