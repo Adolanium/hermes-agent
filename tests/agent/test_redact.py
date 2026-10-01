@@ -1541,6 +1541,31 @@ class TestCredentialStoreReads:
         out = redact_terminal_output("pw1\nCANARY\n", f"tail -n 1 {short} && cat app.py")
         assert "pw1" not in out
 
+    def test_mixed_redaction_forgets_a_secret_when_the_store_changes(self, tmp_path):
+        """A repeated mixed read reuses the host file only while it is unchanged.
+
+        After a rewrite the old password is no longer a stored value, so other
+        output may show it, and the new password is masked.
+        """
+        from agent.redact import redact_terminal_output
+
+        store = tmp_path / ".netrc"
+        old = "first-secret-value"
+        new = "second-secret-value"
+        store.write_text(f"machine a\nlogin bob\npassword {old}\n", encoding="utf-8", newline="\n")
+        command = f"tail -n 1 {store} && echo other"
+        out = redact_terminal_output(f"{old}\nCANARY\n", command)
+        assert old not in out
+        assert "CANARY" in out
+        out = redact_terminal_output(f"{old}\nCANARY\n", command)
+        assert old not in out
+
+        store.write_text(f"machine a\nlogin bob\npassword {new}\n", encoding="utf-8", newline="\n")
+        out = redact_terminal_output(f"{old}\n{new}\nCANARY\n", command)
+        assert new not in out
+        assert old in out
+        assert "CANARY" in out
+
     def test_every_credential_basename_has_a_grammar(self):
         from agent.file_safety import _HOME_CREDENTIAL_BASENAMES
         from agent.redact import _credential_store_format

@@ -1133,19 +1133,54 @@ def _credential_store_format(arg: str) -> str | None:
 
 
 _STORE_READ_LIMIT = 1 << 20
+_STORE_READ_CACHE_MAX = 8
+_STORE_READ_CACHE: dict[str, tuple] = {}
+_STORE_READ_LOCK = threading.Lock()
+
+
+def _store_cache_key(path: str) -> str:
+    try:
+        resolved = os.path.realpath(path)
+    except OSError:
+        resolved = os.path.abspath(path)
+    return os.path.normcase(resolved)
 
 
 def _read_store_on_host(arg: str) -> str | None:
     """The store at ``arg`` as this process sees it, or None when it cannot be read. A relative
-    path resolves against the terminal's cwd, which is not known here, so it counts as unreadable."""
+    path resolves against the terminal's cwd, which is not known here, so it counts as unreadable.
+
+    Mixed redaction re-reads this on every terminal poll. The bytes are reused while the file's
+    signature is unchanged, and a rewrite (mtime or size) reads again. The key is the absolute
+    path, so two profiles do not share a cache entry unless they name the same file.
+    """
+    from utils import file_signature
+
     path = os.path.expandvars(os.path.expanduser(arg.strip("\"'")))
     if not os.path.isabs(path):
         return None
+    key = _store_cache_key(path)
     try:
-        with open(path, encoding="utf-8", errors="replace") as fh:
-            return fh.read(_STORE_READ_LIMIT)
+        sig = file_signature(os.stat(path))
     except OSError:
         return None
+    with _STORE_READ_LOCK:
+        hit = _STORE_READ_CACHE.get(key)
+        if hit is not None and hit[0] == sig:
+            _STORE_READ_CACHE.pop(key)
+            _STORE_READ_CACHE[key] = hit
+            return hit[1]
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            content = fh.read(_STORE_READ_LIMIT)
+            sig = file_signature(os.fstat(fh.fileno()))
+    except OSError:
+        return None
+    with _STORE_READ_LOCK:
+        _STORE_READ_CACHE[key] = (sig, content)
+        while len(_STORE_READ_CACHE) > _STORE_READ_CACHE_MAX:
+            _STORE_READ_CACHE.pop(next(iter(_STORE_READ_CACHE)))
+    return content
 
 
 def _credential_store_source(arg: str, *, read: bool) -> StoreSource | None:

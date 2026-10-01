@@ -25,7 +25,9 @@ also carry other files (``cat ~/.netrc app.py``, ``tail -n 1 ~/.netrc && cat app
   applies and may mask other output rather than risk a stored value.
 """
 
+import hashlib
 import re
+import threading
 from dataclasses import dataclass
 from typing import Callable, Iterable, Literal
 
@@ -300,11 +302,32 @@ def _format_spans(text: str, fmt: str, mask: Mask, secret_key: SecretKey, from_t
             for s in _ini_spans(text, mask, secret_key, delimiters, bodies, from_top)]
 
 
+_LEARNED_CACHE_MAX = 8
+_LEARNED_CACHE: dict[tuple, frozenset[str] | None] = {}
+_LEARNED_LOCK = threading.Lock()
+
+
+def _learned_cache_key(fmt: str, secret_key: SecretKey, content: str) -> tuple:
+    digest = hashlib.sha256(content.encode("utf-8", "surrogatepass")).digest()
+    return (fmt, id(secret_key), digest)
+
+
 def _stored_values(store: StoreSource, secret_key: SecretKey) -> set[str] | None:
     """Every value the store's grammar masks in its complete file, plus the words of multi-word
     values (``awk '{print $3}'`` can emit one word of ``password = alpha bravo``). None when a
-    value is too short to mask wherever it appears, so the store cannot be handled by value."""
+    value is too short to mask wherever it appears, so the store cannot be handled by value.
+
+    The grammar result is reused for identical content. A rewritten store has different bytes,
+    so the next call learns the new values and forgets the old ones.
+    """
     content = store.content or ""
+    cache_key = _learned_cache_key(store.fmt, secret_key, content) if content else None
+    if cache_key is not None:
+        with _LEARNED_LOCK:
+            if cache_key in _LEARNED_CACHE:
+                cached = _LEARNED_CACHE.pop(cache_key)
+                _LEARNED_CACHE[cache_key] = cached
+                return None if cached is None else set(cached)
     found: list[str] = []
 
     def _capture(value: str) -> str:
@@ -316,9 +339,17 @@ def _stored_values(store: StoreSource, secret_key: SecretKey) -> set[str] | None
     candidates = set(found) | {content[a:b] for a, b, _ in spans}
     values = {c.strip() for c in candidates} - {""}
     if any(len(v) < _MIN_LEARNED_VALUE and v.lower() not in _NOT_SECRET_VALUES for v in values):
-        return None
-    values |= {word for value in values for word in value.split() if len(word) >= _MIN_LEARNED_VALUE}
-    return {v for v in values if v.lower() not in _NOT_SECRET_VALUES}
+        learned: frozenset[str] | None = None
+    else:
+        values |= {word for value in values for word in value.split() if len(word) >= _MIN_LEARNED_VALUE}
+        learned = frozenset(v for v in values if v.lower() not in _NOT_SECRET_VALUES)
+    if cache_key is not None:
+        with _LEARNED_LOCK:
+            _LEARNED_CACHE.pop(cache_key, None)
+            _LEARNED_CACHE[cache_key] = learned
+            while len(_LEARNED_CACHE) > _LEARNED_CACHE_MAX:
+                _LEARNED_CACHE.pop(next(iter(_LEARNED_CACHE)))
+    return None if learned is None else set(learned)
 
 
 def _value_spans(text: str, values: set[str], mask: Mask) -> list[Span]:
