@@ -141,3 +141,44 @@ class TestAbandonNativeStreamOnTurnDeath:
         assert [f["text"] for f in finals] == ["partial answer on screen"]
         assert sc.final_response_sent is False
         adapter.send.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_cancel_during_native_finalize_still_closes_state(self):
+        """A cancel that lands inside the finalize send is not an Exception.
+
+        ``_try_frame`` lets it propagate. The stream must still be disarmed,
+        and the abandoned text must not suppress the next turn's first frame.
+        """
+        adapter = _make_native_streaming_adapter()
+        started = asyncio.Event()
+
+        async def _send_stream_frame(
+            text, *, finalize=False, chat_id=None, reply_to=None, **kwargs
+        ):
+            if finalize:
+                started.set()
+                await asyncio.Event().wait()
+            adapter.frames.append({
+                "text": text, "finalize": finalize,
+                "chat_id": chat_id, "reply_to": reply_to,
+            })
+            return True
+
+        adapter.send_stream_frame = _send_stream_frame
+        sc = GatewayStreamConsumer(
+            adapter, "C1",
+            StreamConsumerConfig(edit_interval=0.01, buffer_threshold=1, cursor=""),
+        )
+        sc._use_native_streaming = True
+        sc._native_stream_opened = True
+        sc._last_sent_text = "partial answer on screen"
+
+        task = asyncio.create_task(sc._abandon_native_stream())
+        await started.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        assert sc._native_stream_opened is False
+        assert sc._last_sent_text == ""
+        assert not any(f["finalize"] for f in adapter.frames)

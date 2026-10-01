@@ -205,11 +205,18 @@ class StreamTransportMixin:
         if self._use_native_streaming and self._native_stream_opened:
             # A native stream closes only on a finalize frame. Until then the adapter keeps it
             # alive (WeCom re-sends it on a keepalive timer). Re-send what is on screen, closed.
-            await self._try_frame(
-                self._send_frame(self._last_sent_text or self._clean_for_display(self._accumulated),
-                                 finalize=True),
-                "Abandon native stream finalize failed (best-effort): %s")
-            self._close_native_state()
+            # CancelledError is a BaseException, so _try_frame does not catch a cancel that
+            # lands while this send is in flight. Close local state anyway.
+            try:
+                await self._try_frame(
+                    self._send_frame(self._last_sent_text or self._clean_for_display(self._accumulated),
+                                     finalize=True),
+                    "Abandon native stream finalize failed (best-effort): %s")
+            finally:
+                self._close_native_state()
+                # The abandoned text is not a prefix of the next turn. Leaving it set makes
+                # that turn's first identical frame look unchanged and skip the send.
+                self._last_sent_text = ""
             return
         if not self._use_draft_streaming:
             return
