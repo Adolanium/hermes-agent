@@ -242,7 +242,16 @@ class _Cred:
             value = _env_first(env)
             if not value:
                 if key in extra:
-                    continue  # env is silent, so the config.yaml value stands
+                    # Env is silent, so the config.yaml value stands, but it still
+                    # goes through the spec converter. A quoted "9999" or "true"
+                    # would otherwise stay a string. Converters parse env strings,
+                    # so a native yaml scalar is stringified first.
+                    if len(rest) > 1:
+                        raw = extra[key]
+                        if not isinstance(raw, str):
+                            raw = "" if raw is None else str(raw)
+                        extra[key] = rest[1](raw)
+                    continue
                 value = rest[0] if rest else ""
             extra[key] = rest[1](value) if len(rest) > 1 else value
         _env_extras(extra, self.optional)

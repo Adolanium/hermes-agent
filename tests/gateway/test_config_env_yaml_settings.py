@@ -69,3 +69,43 @@ def test_env_value_still_beats_yaml_when_set(
 
     assert cfg.extra[key] == env_result
     assert cfg.extra[key] != yaml_value
+
+
+def test_yaml_port_string_is_converted_when_env_is_unset(tmp_path, monkeypatch):
+    cfg = _load(
+        monkeypatch, tmp_path, "bluebubbles",
+        {"BLUEBUBBLES_SERVER_URL": "http://127.0.0.1:1234", "BLUEBUBBLES_PASSWORD": "bb-pw"},
+        "webhook_port", "9999", {},
+    )
+
+    assert cfg.extra["webhook_port"] == 9999
+
+
+def test_yaml_port_garbage_uses_the_converter_default(tmp_path, monkeypatch):
+    cfg = _load(
+        monkeypatch, tmp_path, "bluebubbles",
+        {"BLUEBUBBLES_SERVER_URL": "http://127.0.0.1:1234", "BLUEBUBBLES_PASSWORD": "bb-pw"},
+        "webhook_port", "not-a-port", {},
+    )
+
+    assert cfg.extra["webhook_port"] == 8645
+
+
+def test_yaml_quoted_bool_is_converted_when_env_is_unset(tmp_path, monkeypatch):
+    cfg = _load(
+        monkeypatch, tmp_path, "bluebubbles",
+        {"BLUEBUBBLES_SERVER_URL": "http://127.0.0.1:1234", "BLUEBUBBLES_PASSWORD": "bb-pw"},
+        "send_read_receipts", "true", {},
+    )
+
+    assert cfg.extra["send_read_receipts"] is True
+
+
+def test_yaml_native_bool_survives_a_string_converter(tmp_path, monkeypatch):
+    cfg = _load(
+        monkeypatch, tmp_path, "bluebubbles",
+        {"BLUEBUBBLES_SERVER_URL": "http://127.0.0.1:1234", "BLUEBUBBLES_PASSWORD": "bb-pw"},
+        "require_mention", False, {},
+    )
+
+    assert cfg.extra["require_mention"] is False
