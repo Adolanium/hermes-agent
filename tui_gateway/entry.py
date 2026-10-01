@@ -25,6 +25,21 @@ from tui_gateway.transport import TeeTransport
 
 logger = logging.getLogger(__name__)
 
+
+def _dispatch_or_handler_error(req):
+    """One stdin request. An inline handler crash becomes a JSON-RPC error.
+
+    Pool handlers already catch their own failures. An inline handler used to
+    kill this reader, which is the process.
+    """
+    method = req.get("method") if isinstance(req, dict) else None
+    try:
+        return dispatch(req)
+    except Exception as exc:
+        rid = req.get("id") if isinstance(req, dict) else None
+        logger.exception("inline RPC handler failed for method=%r id=%r", method, rid)
+        return server._err(rid, -32000, f"handler error: {exc}")
+
 # Handle for the background MCP tool-discovery thread (see
 # ensure_mcp_discovery_started).  The first agent build briefly joins this so
 # already-spawning fast servers land before the agent snapshots its tool list
@@ -479,7 +494,7 @@ def main():
             continue
 
         method = req.get("method") if isinstance(req, dict) else None
-        resp = dispatch(req)
+        resp = _dispatch_or_handler_error(req)
         if resp is not None:
             if not write_json(resp):
                 _log_exit(f"response write failed for method={method!r} (broken stdout pipe)")

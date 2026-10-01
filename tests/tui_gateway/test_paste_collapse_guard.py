@@ -48,3 +48,20 @@ def test_valid_text_still_writes_paste():
     resp = server.handle_request(_request({"text": "hello\nworld"}))
     assert "error" not in resp
     assert resp["result"]["lines"] == 2
+
+
+def test_non_dict_params_are_rejected_before_the_handler():
+    resp = server.handle_request(_request(["not", "a", "dict"]))
+    assert resp["error"]["code"] == -32602
+
+
+def test_inline_handler_crash_returns_an_error_response(monkeypatch):
+    def boom(rid, params):
+        raise RuntimeError("boom")
+
+    monkeypatch.setitem(server._methods, "paste.collapse", boom)
+    from tui_gateway.entry import _dispatch_or_handler_error
+
+    resp = _dispatch_or_handler_error(_request({"text": "hello"}))
+    assert resp["error"]["code"] == -32000
+    assert "boom" in resp["error"]["message"]
