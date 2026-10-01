@@ -3184,12 +3184,6 @@ export const heOverrides = {
     mcpServers: 'שרתי MCP',
     archivedChats: 'צ׳אטים בארכיון',
     sections: { maintenance: 'תחזוקה', sessions: 'סשנים', system: 'מערכת', usage: 'שימוש' },
-    sectionDescriptions: {
-      maintenance: 'אבחון, גיבויים, אוצר המיומנויות ונתוני זיכרון',
-      sessions: 'חיפוש וניהול סשנים',
-      system: 'סטטוס, יומנים ופעולות מערכת',
-      usage: 'פעילות טוקנים, עלויות ומיומנויות לאורך זמן'
-    },
     nav: {
       newChat: { title: 'סשן חדש', detail: 'התחלת סשן חדש' },
       settings: { title: 'הגדרות', detail: 'הגדרת Hermes Desktop' },
