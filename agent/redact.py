@@ -16,7 +16,7 @@ from urllib.parse import unquote_plus
 # drift: a blocked file_tools read that falls back to ``cat`` is still caught.
 from agent.file_safety import _BLOCKED_PROJECT_ENV_BASENAMES as _ENV_FILE_BASENAMES
 from agent.file_safety import _HOME_CREDENTIAL_BASENAMES
-from agent.redact_credential_stores import Extent, StoreSource, mask_credential_stores
+from agent.redact_credential_stores import Extent, StoreSnapshot, StoreSource, mask_credential_stores
 
 logger = logging.getLogger(__name__)
 
@@ -874,6 +874,7 @@ def _redact_phone(m):
 def redact_sensitive_text(text: str, *, force: bool = False, code_file: bool = False,
                           file_read: bool = False, secret_file: bool = False,
                           source_paths: Iterable[str] = (), source_extent: Extent = "slice",
+                          source_backend: str | None = None,
                           redact_url_credentials: bool = False) -> str:
     """Apply all redaction patterns to a block of text.
 
@@ -919,8 +920,9 @@ def redact_sensitive_text(text: str, *, force: bool = False, code_file: bool = F
     ``source_extent`` says how much of the text those files own: ``"start"`` (from the top of
     the file), ``"slice"`` (a part that may begin mid-value; the default for a read_file page or
     search match) or ``"mixed"`` (terminal output that also carries other files or commands; the
-    store is then read on this host so its own values can be told from other output, and the
-    output fails closed when it cannot be, see agent/redact_credential_stores.py).
+    store can then supply its own values only through a complete snapshot of the producing
+    backend). ``source_backend`` comes from the executor, never ambient terminal config.
+    Only ``"local"`` permits host reads; other or unknown backends use conservative masking.
     """
     if text is None:
         return None
@@ -935,7 +937,7 @@ def redact_sensitive_text(text: str, *, force: bool = False, code_file: bool = F
     secret_file = secret_file or any(_is_secret_file_arg(path) for path in source_paths)
     # Mixed output needs the store's own values to tell a bare value line from another file's.
     stores = [store for path in source_paths
-              if (store := _credential_store_source(path, read=source_extent == "mixed"))]
+              if (store := _credential_store_source(path, read=source_extent == "mixed", backend=source_backend))]
     if stores:
         # First, so no generic pass can mask a prefix of a value and hide its remainder. Options
         # are secret by the assignment passes' word-bounded key policy (``author`` is not ``auth``).
@@ -1146,7 +1148,7 @@ def _store_cache_key(path: str) -> str:
     return os.path.normcase(resolved)
 
 
-def _read_store_on_host(arg: str) -> str | None:
+def _read_store_on_host(arg: str) -> StoreSnapshot | None:
     """The store at ``arg`` as this process sees it, or None when it cannot be read. A relative
     path resolves against the terminal's cwd, which is not known here, so it counts as unreadable.
 
@@ -1156,8 +1158,9 @@ def _read_store_on_host(arg: str) -> str | None:
     """
     from utils import file_signature
 
-    path = os.path.expandvars(os.path.expanduser(arg.strip("\"'")))
-    if not os.path.isabs(path):
+    # Shell home/variable expansion may differ from this process even on the local backend.
+    path = arg.strip("\"'")
+    if not os.path.isabs(path) or any(char in path for char in "$`%"):
         return None
     key = _store_cache_key(path)
     try:
@@ -1172,24 +1175,26 @@ def _read_store_on_host(arg: str) -> str | None:
             return hit[1]
     try:
         with open(path, encoding="utf-8", errors="replace") as fh:
-            content = fh.read(_STORE_READ_LIMIT)
+            content = fh.read(_STORE_READ_LIMIT + 1)
             sig = file_signature(os.fstat(fh.fileno()))
     except OSError:
         return None
+    snapshot = StoreSnapshot("local", content[:_STORE_READ_LIMIT], len(content) <= _STORE_READ_LIMIT)
     with _STORE_READ_LOCK:
-        _STORE_READ_CACHE[key] = (sig, content)
+        _STORE_READ_CACHE[key] = (sig, snapshot)
         while len(_STORE_READ_CACHE) > _STORE_READ_CACHE_MAX:
             _STORE_READ_CACHE.pop(next(iter(_STORE_READ_CACHE)))
-    return content
+    return snapshot
 
 
-def _credential_store_source(arg: str, *, read: bool) -> StoreSource | None:
+def _credential_store_source(arg: str, *, read: bool, backend: str | None) -> StoreSource | None:
     split = _path_parts(arg)
     fmt = _store_format(split[0]) if split else None
     if fmt is None:
         return None
     name = tuple(split[0][-2:]) if split[0][-2:-1] == [".aws"] else (split[0][-1],)
-    return StoreSource(fmt, name, _read_store_on_host(arg) if read else None)
+    snapshot = _read_store_on_host(arg) if read and backend == "local" else None
+    return StoreSource(fmt, name, backend, snapshot)
 
 
 def _is_secret_file_arg(arg: str) -> bool:
@@ -1318,7 +1323,8 @@ def redact_for_egress(text: str) -> str:
     return text
 
 
-def redact_terminal_output(output: str, command: str | None = None, *, force: bool = False) -> str:
+def redact_terminal_output(output: str, command: str | None = None, *, force: bool = False,
+                           source_backend: str | None = None) -> str:
     """Single redaction policy for ALL terminal-output surfaces: the ENV/YAML-assignment
     pass runs only when ``command`` is an env dump or reads a secret-bearing file (``.env``,
     shell rc, a credential store like ``.netrc``, Hermes ``config.yaml``); otherwise
@@ -1329,7 +1335,7 @@ def redact_terminal_output(output: str, command: str | None = None, *, force: bo
     code_file = not (secret_args or is_env_dump_command(command))
     extent = _command_store_extent(command, secret_args) if secret_args else "slice"
     redacted = redact_sensitive_text(output, force=force, code_file=code_file, source_paths=secret_args,
-                                     source_extent=extent)
+                                     source_extent=extent, source_backend=source_backend)
     # Source-preserving output still gets the Python-repr pass on high-confidence
     # diagnostic lines (pytest ``E   `` introspection, final exception lines): that is
     # where {'BRAVE_API_KEY': '…'} leaks, not in source dumps.

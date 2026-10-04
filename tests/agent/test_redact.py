@@ -1517,7 +1517,7 @@ class TestCredentialStoreReads:
         app_lines = ["CANARY_ALPHA_LINE_ONE", "password = fetch()", "    CANARY_BETA_LINE_TWO"]
         text = output.format(store=store, body=body, pw=self.WEAK, app_line=app_lines[1],
                              app="".join(f"{line}\n" for line in app_lines))
-        out = redact_terminal_output(text, command.format(store=store, pw=self.WEAK))
+        out = redact_terminal_output(text, command.format(store=store, pw=self.WEAK), source_backend="local")
         assert self.WEAK not in out
         assert all(line in out for line in app_lines if line in text)
 
@@ -1532,13 +1532,14 @@ class TestCredentialStoreReads:
         other.parent.mkdir()
         other.write_text("machine a\npassword\nsomethingElse42\n", encoding="utf-8", newline="\n")
         for store in (missing, other):
-            out = redact_terminal_output(f"{self.WEAK}\nCANARY\n", f"tail -n 1 {store} && cat app.py")
+            out = redact_terminal_output(f"{self.WEAK}\nCANARY\n", f"tail -n 1 {store} && cat app.py",
+                                         source_backend="local")
             assert self.WEAK not in out
 
         short = tmp_path / "short" / ".netrc"
         short.parent.mkdir()
         short.write_text("machine a\npassword\npw1\n", encoding="utf-8", newline="\n")
-        out = redact_terminal_output("pw1\nCANARY\n", f"tail -n 1 {short} && cat app.py")
+        out = redact_terminal_output("pw1\nCANARY\n", f"tail -n 1 {short} && cat app.py", source_backend="local")
         assert "pw1" not in out
 
     def test_mixed_redaction_forgets_a_secret_when_the_store_changes(self, tmp_path):
@@ -1554,14 +1555,14 @@ class TestCredentialStoreReads:
         new = "second-secret-value"
         store.write_text(f"machine a\nlogin bob\npassword {old}\n", encoding="utf-8", newline="\n")
         command = f"tail -n 1 {store} && echo other"
-        out = redact_terminal_output(f"{old}\nCANARY\n", command)
+        out = redact_terminal_output(f"{old}\nCANARY\n", command, source_backend="local")
         assert old not in out
         assert "CANARY" in out
-        out = redact_terminal_output(f"{old}\nCANARY\n", command)
+        out = redact_terminal_output(f"{old}\nCANARY\n", command, source_backend="local")
         assert old not in out
 
         store.write_text(f"machine a\nlogin bob\npassword {new}\n", encoding="utf-8", newline="\n")
-        out = redact_terminal_output(f"{old}\n{new}\nCANARY\n", command)
+        out = redact_terminal_output(f"{old}\n{new}\nCANARY\n", command, source_backend="local")
         assert new not in out
         assert old in out
         assert "CANARY" in out
