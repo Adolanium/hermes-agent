@@ -553,7 +553,7 @@ def _strip_trailing_punctuation(value: str) -> str:
     # reverse pass keeps those counts as totals minus what it already walked past.
     # Reference values come from inbound messages and are unbounded (\S+), which makes
     # a recount-per-dropped-character loop quadratic on crafted input.
-    total = {ch: stripped.count(ch) for ch in ")]}([{"}
+    total = {ch: stripped.count(ch) for ch in {*_OPENERS, *_OPENERS.values()}}
     tail = dict.fromkeys(total, 0)
     cut = len(stripped)
     for i in range(len(stripped) - 1, -1, -1):

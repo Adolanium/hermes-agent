@@ -808,28 +808,15 @@ def test_strip_trailing_punctuation_matches_the_per_character_trim():
 
 
 def test_strip_trailing_punctuation_stays_linear_on_closer_runs():
-    """Reference values are unbounded \S+ tokens from inbound messages. A message
-    like "@file:x" followed by a long run of ")" must not cost quadratic time in
-    the trim. 4x the closers costs about 4x the time when linear, about 16x when
-    quadratic, so the ratio is what we assert (min of 5 runs rejects noise)."""
+    """A large closer run catches the quadratic loop with room for CI scheduling noise."""
     import time
 
     from agent.context_references import _strip_trailing_punctuation
 
-    def best_of_five(n: int) -> float:
-        token = "x" + ")" * n
-        durations = []
-        for _ in range(5):
-            start = time.perf_counter()
-            assert _strip_trailing_punctuation(token) == "x"
-            durations.append(time.perf_counter() - start)
-        return min(durations)
-
-    small = best_of_five(5_000)
-    large = best_of_five(20_000)
-    ratio = large / small
-
-    assert ratio < 8, (
-        f"trailing-closer trim is superlinear: 4x closers cost {ratio:.1f}x time "
-        f"(about 4 when linear, about 16 when quadratic)"
-    )
+    token = "x" + ")" * 200_000
+    durations = []
+    for _ in range(3):
+        start = time.perf_counter()
+        assert _strip_trailing_punctuation(token) == "x"
+        durations.append(time.perf_counter() - start)
+    assert min(durations) < 2.0
