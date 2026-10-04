@@ -83,6 +83,7 @@ croniter = false
 browser-harness = false
 azure-identity = false
 lark-oapi = false
+distlib = false
 firecrawl-anydoc = false
 google-api-python-client = false
 brotlicffi = false

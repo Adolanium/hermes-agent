@@ -16,19 +16,22 @@ def _normalized(name: str) -> str:
 
 def _exact_pins_by_table() -> dict[str, list[Requirement]]:
     """``{table: [Requirement, ...]}`` for every ``==`` pin across all dependency tables."""
-    project = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+    manifest = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    project = manifest["project"]
     tables = {"dependencies": project["dependencies"]}
     tables.update(
         {f"optional-dependencies.{extra}": specs
          for extra, specs in project["optional-dependencies"].items()})
-    build = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))["build-system"]
-    tables["build-system.requires"] = build["requires"]
+    tables["build-system.requires"] = manifest["build-system"]["requires"]
+    # Included groups are scanned under their own names; their mappings are not requirements.
+    tables.update({f"dependency-groups.{group}": [spec for spec in specs if isinstance(spec, str)]
+                   for group, specs in manifest.get("dependency-groups", {}).items()})
     pinned = {}
     for table, specs in tables.items():
         for spec in specs:
             requirement = Requirement(spec)
             pins = list(requirement.specifier)
-            if len(pins) == 1 and pins[0].operator == "==":
+            if len(pins) == 1 and pins[0].operator == "==" and not pins[0].version.endswith(".*"):
                 pinned.setdefault(table, []).append(requirement)
     return pinned
 
