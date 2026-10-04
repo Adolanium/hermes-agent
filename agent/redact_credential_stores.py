@@ -18,11 +18,10 @@ also carry other files (``cat ~/.netrc app.py``, ``tail -n 1 ~/.netrc && cat app
 
 * a grep line whose ``path:N:`` prefix names the store is store content and gets the grammar;
   a line naming another file is never parsed by it;
-* for lines with no owner, the store as read on the control host supplies its actual values,
-  which are masked wherever they appear, and nothing else is touched;
-* when the store cannot be read on the control host, or none of its values appear in those
-  lines (a remote backend's file may differ from the host's), they fail closed: the catch-all
-  applies and may mask other output rather than risk a stored value.
+* for lines with no owner, a complete snapshot from the producing backend supplies the
+  values to mask, leaving other output intact;
+* an unknown backend, an incomplete or unreadable snapshot, or output inconsistent with the
+  snapshot uses the catch-all. This may mask other output rather than pass a stored value.
 """
 
 import hashlib
@@ -43,15 +42,23 @@ Lines = list[tuple[int, int]]  # (start, end) of each line body in the original 
 
 
 @dataclass(frozen=True)
+class StoreSnapshot:
+    """Bounded store content with its filesystem origin and completeness."""
+
+    backend: str
+    content: str
+    complete: bool
+
+
+@dataclass(frozen=True)
 class StoreSource:
     """A credential store the text was read from."""
 
     fmt: str
     # Trailing path parts that name the store in a grep prefix: (".netrc",), (".aws", "config").
     name: tuple[str, ...]
-    # The store as read on the control host; only consulted for mixed output. None when it
-    # could not be read there.
-    content: str | None = None
+    backend: str | None = None
+    snapshot: StoreSnapshot | None = None
 
 
 # ``cat -n`` / read_file gutter: only trusted when EVERY line carries one and the numbers are
@@ -320,7 +327,10 @@ def _stored_values(store: StoreSource, secret_key: SecretKey) -> set[str] | None
     The grammar result is reused for identical content. A rewritten store has different bytes,
     so the next call learns the new values and forgets the old ones.
     """
-    content = store.content or ""
+    snapshot = store.snapshot
+    if snapshot is None or not snapshot.complete or snapshot.backend != store.backend:
+        return None
+    content = snapshot.content
     cache_key = _learned_cache_key(store.fmt, secret_key, content) if content else None
     if cache_key is not None:
         with _LEARNED_LOCK:
@@ -392,13 +402,13 @@ def _mixed_spans(text: str, stores: list[StoreSource], mask: Mask, secret_key: S
         spans += _format_spans(text, stores[k].fmt, mask, secret_key, False, bodies)
 
     learned = {k: values for k, s in enumerate(stores)
-               if s.content is not None and (values := _stored_values(s, secret_key)) is not None}
+               if (values := _stored_values(s, secret_key)) is not None}
     for values in learned.values():
         spans += _value_spans(text, values, mask)
     unowned_text = "\n".join(text[a:b] for a, b in unowned)
-    # The host copy stands for what the command read only if one of its values shows up (or it
-    # has none). Otherwise a value line cut from its keyword is indistinguishable from another
-    # file's line, so fail closed.
+    # A matching value cannot establish source identity or completeness; _stored_values
+    # requires both before consulting its content cache. Even a verified snapshot can go
+    # stale after the command runs, so inconsistent output still selects the catch-all.
     blind = any(k not in learned or (learned[k] and not any(v in unowned_text for v in learned[k]))
                 for k in range(len(stores)))
     if unowned and unowned_text.strip() and blind:
