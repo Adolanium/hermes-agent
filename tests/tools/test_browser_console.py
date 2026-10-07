@@ -62,6 +62,17 @@ class TestBrowserConsole:
         assert result["success"] is False
         assert "daemon not responding" in result["error"]
 
+    def test_js_error_text_from_the_cli_json_shape_is_kept(self):
+        from tools.browser_tool import browser_console
+
+        replies = {"console": {"success": True, "data": {"messages": []}},
+                   "errors": {"success": True, "data": {"errors": [{"text": "Error: DETACHED-REJECTION"}]}}}
+        with patch("tools.browser_tool._is_camofox_mode", return_value=False),              patch("tools.browser_tool._blocked_private_page_content", return_value=None),              patch("tools.browser_tool_session._run_browser_command",
+                   side_effect=lambda _task, command, _args: replies[command]):
+            result = json.loads(browser_console(task_id="test"))
+
+        assert result["js_errors"] == [{"message": "Error: DETACHED-REJECTION", "source": "exception"}]
+
     def test_redacts_secrets_from_console_messages_and_errors(self):
         from tools.browser_tool import browser_console
 

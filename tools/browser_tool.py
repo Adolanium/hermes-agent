@@ -1005,7 +1005,8 @@ def browser_console(clear: bool = False, expression: Optional[str] = None, task_
         for msg in console_result.get("data", {}).get("messages", [])
     ]
     errors = [
-        {"message": _snapshot._redact_browser_output(err.get("message", "")), "source": "exception"}
+        # agent-browser's `errors --json` carries the error under ``text``.
+        {"message": _snapshot._redact_browser_output(err.get("text") or err.get("message", "")), "source": "exception"}
         for err in errors_result.get("data", {}).get("errors", [])
     ]
     response = {
