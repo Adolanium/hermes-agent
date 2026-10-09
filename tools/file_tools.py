@@ -798,7 +798,8 @@ def _edit_warnings(paths: list[str], path_to_resolved: dict, task_id: str) -> li
         r = path_to_resolved.get(p)
         w = (file_state.check_stale(task_id, r) if r else None) or _check_file_staleness(p, task_id)
         if not w and r:
-            w = _path_resolution_warning(p, Path(r), task_id)
+            # The resolved string, not Path(r): a container path is not a host path.
+            w = _path_resolution_warning(p, r, task_id)
         if w:
             warnings.append(w)
     return warnings
