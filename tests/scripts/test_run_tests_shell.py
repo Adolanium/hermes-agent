@@ -7,8 +7,6 @@ import sys
 
 import pytest
 
-from tests.pm.activation_support import bash, child_env, posix
-
 
 @pytest.mark.platforms("posix")
 def test_shell_runner_executes_tests_and_propagates_failure(tmp_path):
@@ -42,6 +40,10 @@ def test_tests_never_get_the_windows_directory_as_their_temp_dir(tmp_path):
     test and every native child (GetTempPath2W, Rust's ``temp_dir()``): a user cannot write
     there, an administrator litters it. A shell whose TEMP/TMP name the Windows directory
     delivers that same value without having to start a fresh MSYS session."""
+    # Imported here so the POSIX canary above, the runner check the Termux lane runs,
+    # keeps importing nothing beyond the stdlib and pytest.
+    from tests.pm.activation_support import bash, child_env, posix
+
     report = tmp_path / "seen.json"
     case = tmp_path / "test_temp_probe.py"
     case.write_text(
