@@ -128,6 +128,23 @@ def test_relative_writes_compare_against_the_container_cwd(sandbox):
 
 
 @pytest.mark.platforms("windows")
+def test_host_path_outside_the_mount_is_refused(sandbox, tmp_path):
+    """No container path names it: writing it anyway lands in the sandbox's own
+    filesystem (or the workspace) while the result reports the host path."""
+    proj, mount = sandbox
+    outside = tmp_path / "elsewhere" / "x.md"
+
+    written = _call("write_file", {"path": str(outside), "content": "x\n"})
+    patched = _call("patch", {"mode": "patch",
+                              "patch": f"*** Begin Patch\n*** Add File: {outside}\n+x\n*** End Patch\n"})
+
+    for out in (written, patched):
+        assert mount in out.get("error", ""), out
+    assert not outside.exists()
+    assert _tree(proj) == []
+
+
+@pytest.mark.platforms("windows")
 def test_ssh_relative_write_under_the_remote_cwd_has_no_warning(tmp_path, isolated_envs):
     remote = tmp_path / "remote"
     (remote / "proj").mkdir(parents=True)
