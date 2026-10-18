@@ -1,4 +1,4 @@
-"""Pure-data factories for the optional-credential configuration catalog."""
+"""Entry factories for ``config_defaults.OPTIONAL_ENV_VARS`` (pure-data leaf, no imports)."""
 
 
 def _env(description, prompt, **keys):
@@ -15,30 +15,16 @@ def _category(category, password, advanced):
     ``url``/``help``/``tools`` are only written when passed; ``password=None`` omits the key;
     ``advanced`` is only written when true. Key order matches the plain ``_env`` entries.
     """
-
-    def make(
-        description,
-        prompt,
-        url=_OMIT,
-        *,
-        help=_OMIT,
-        tools=_OMIT,
-        password=password,
-        advanced=advanced,
-    ):
+    def make(description, prompt, url=_OMIT, *, help=_OMIT, tools=_OMIT, password=password,
+             advanced=advanced):
         d = {"description": description, "prompt": prompt}
-        d.update(
-            (k, v)
-            for k, v in (("help", help), ("url", url), ("tools", tools))
-            if v is not _OMIT
-        )
+        d.update((k, v) for k, v in (("help", help), ("url", url), ("tools", tools)) if v is not _OMIT)
         if password is not None:
             d["password"] = password
         d["category"] = category
         if advanced:
             d["advanced"] = True
         return d
-
     return make
 
 
