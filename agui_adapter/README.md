@@ -5,15 +5,21 @@ clients (e.g. CopilotKit) can drive it from a browser.
 
 ## Quick start
 
+This checkout contains a local modernization prototype, not a merge-ready
+release. The three launchers and explicit setup section are integrated, and
+published-client browser handoff/approval probes pass, including CopilotKit's
+runtime proxy and React hooks. Real-provider acceptance, final build/upstream
+integration and remaining lifecycle review are still pending.
+
 ```bash
-# 1. Install the adapter extra (adds the `hermes-agui` command + deps)
-pip install -e '.[agui]'            # or: pip install 'hermes-agent[agui]'
+# 1. After preparing/activating a Hermes checkout, select the extra through PM
+hermes pm install --extra agui
 
 # 2. One-time: make sure Hermes has a provider + model configured
 hermes model                        # pick provider/model, set credentials
 
 # 3. Start the server (binds http://127.0.0.1:8000 by default)
-hermes agui                         # equivalently: hermes-agui / python -m agui_adapter
+hermes agui                         # also: hermes-agui / python -m agui_adapter
 ```
 
 That's the whole thing on a local machine. `hermes-agui` **reuses your existing
@@ -30,26 +36,73 @@ Starting Hermes AG-UI adapter on 127.0.0.1:8000
 Point any AG-UI client at **`http://127.0.0.1:8000/`** (the run endpoint is
 `POST /`; there's also `GET /health`).
 
-> `hermes agui`, the `hermes-agui` script, and `python -m agui_adapter` are
-> equivalent entry points.
+`hermes agui`, `hermes-agui`, and `python -m agui_adapter` share the same
+`--host`, `--port`, `--token`, and `--check` options. `--check` verifies imports
+without starting a server or making a model request. All launchers load the
+selected Hermes home's `.env`; none requires an interactive TTY to serve.
+
+## Docker
+
+The image's default/no-argument command is the interactive Hermes experience,
+not an AG-UI service. **Pass an explicit `agui` command** for headless hosting;
+a restart policy cannot turn the interactive CLI into a server.
+
+Build this checkout (the image's `all` selection includes the AG-UI extra):
+
+```bash
+docker build -t hermes-agent:agui .
+```
+
+Configure a dedicated persistent data volume. These one-time setup commands
+are interactive; the long-running service below is not. In `setup agui`, choose
+`0.0.0.0` inside the container and save a strong session token when prompted.
+The provider credentials and token stay in that volume's `.env`.
+
+```bash
+docker run --rm -it --mount type=volume,source=hermes-agui-data,target=/opt/data hermes-agent:agui model
+docker run --rm -it --mount type=volume,source=hermes-agui-data,target=/opt/data hermes-agent:agui setup agui
+docker run --name hermes-agui --publish 127.0.0.1:8000:8000 --mount type=volume,source=hermes-agui-data,target=/opt/data hermes-agent:agui agui --host 0.0.0.0 --port 8000
+```
+
+Publishing on host `127.0.0.1` limits reachability to the host; the container
+still requires a token because its own bind is non-loopback. `GET /health` is
+open; JSON run requests require `X-Hermes-Session-Token`. Secrets may also be
+injected through the documented credential environment variable. Do not
+override the image entrypoint or mount your normal Hermes home for a smoke test.
+Both normal s6/PID-1 startup and Docker's `--init` wrapper are supported.
 
 ## Connecting a client
 
-Any AG-UI `HttpAgent` works. With **CopilotKit**, the usual shape is a Next.js
+Use AG-UI's standard `HttpAgent`. With **CopilotKit**, the usual shape is a Next.js
 runtime route that proxies to this server:
 
 ```ts
 // app/api/copilotkit/route.ts
-import { HermesAgent } from "@ag-ui/hermes";
+import { HttpAgent } from "@ag-ui/client";
 const AGENT_URL = process.env.AGENT_URL ?? "http://localhost:8000";
-const agent = new HermesAgent({ url: `${AGENT_URL}/` });
+const agent = new HttpAgent({
+  url: `${AGENT_URL.replace(/\/$/, "")}/`,
+  // Required when the adapter has a token; keep it on the runtime server:
+  headers: process.env.HERMES_AGUI_SESSION_TOKEN
+    ? { "X-Hermes-Session-Token": process.env.HERMES_AGUI_SESSION_TOKEN }
+    : {},
+});
 // ...register `agent` with CopilotRuntime as usual
 ```
 
 The browser talks to your Next.js runtime; the runtime (server-side) talks to
 `hermes-agui` on `:8000`. Because that hop is server-to-server on localhost, the
-loopback/no-token setup is all you need. (See `showcase/integrations/hermes/` in
-the CopilotKit repo for a complete working example.)
+loopback/no-token setup is all you need. A remote/runtime-container hop needs
+an appropriately reachable adapter URL and session token. No Hermes-specific
+JavaScript package or Gateway API change is required.
+
+If installing your JavaScript client fails with npm's `Cannot read properties
+of null (reading 'edgesOut')`, check the npm version before changing Hermes.
+This is an [upstream peer-resolver bug](https://github.com/npm/cli/pull/8448).
+The CopilotKit 1.70.3 client/runtime was validated with Node 22.23.2 and npm
+11.16.0 using normal peer resolution; npm 10.9.8 reproduced the crash even in
+a standalone Vitest-only project. Use a project-local npm toolchain containing
+the fix; disabling peer checks is not required for this validated setup.
 
 ## Configuration
 
@@ -57,8 +110,7 @@ Behavioral settings live in the `agui` section of `config.yaml`
 (`~/.hermes/config.yaml`), alongside every other Hermes setting — nothing is
 required for the local quick start above. The **only AG-UI-specific** environment
 variable is the session token, because it's a secret (Hermes reserves `.env` for
-secrets). Run `hermes setup agui` for the interactive configuration flow, or
-edit the section directly:
+secrets). Run `hermes setup agui` for explicit setup, or edit the section:
 
 ```yaml
 # ~/.hermes/config.yaml
@@ -71,6 +123,9 @@ agui:
   model: ""                # e.g. "gpt-4o"
   api_mode: ""             # "chat_completions" or "responses"
   base_url: ""             # set to bypass the resolver and call this endpoint directly
+  frontend_tool_timeout: 60       # seconds to wait for a browser tool result
+  max_conversations: 16           # active + idle agents; reject excess admission
+  conversation_idle_timeout: 1800 # seconds before closing an idle conversation
 ```
 
 | Setting | Where | Default | Purpose |
@@ -79,18 +134,28 @@ agui:
 | `agui.port` | `config.yaml` | `8000` | Listen port. |
 | `agui.toolsets` | `config.yaml` | `[hermes-acp]` | Hermes toolsets enabled for the agent. |
 | `agui.provider` / `model` / `api_mode` / `base_url` | `config.yaml` | *(your `hermes model` config)* | Optional per-adapter model overrides; blank defers to the resolver. |
+| `agui.frontend_tool_timeout` | `config.yaml` | `60` | Positive finite wait in seconds; expiry cancels the pending execution. |
+| `agui.max_conversations` | `config.yaml` | `16` | Positive integer cap, including idle agents; no early eviction. |
+| `agui.conversation_idle_timeout` | `config.yaml` | `1800` | Positive finite idle lifetime in seconds. Active/parked turns are not idle. |
 | `HERMES_AGUI_SESSION_TOKEN` | **`.env`** (secret) | — | Required off-loopback; optional defense-in-depth on loopback. |
 | `--host` / `--port` / `--token` | `hermes agui` flags | — | Override the above per invocation. |
 
 **Two ways it finds a provider:**
 
 - **Default (local use):** `agui.base_url` blank → provider, credentials, and model
-  are resolved per run from your `hermes model` config, exactly like the Hermes
+  are resolved when a conversation is created from your `hermes model` config, like the Hermes
   CLI. This is the zero-config path.
 - **Explicit endpoint:** set `agui.base_url` → the hermes resolver is skipped and
   all calls go to that OpenAI-compatible URL (credentials from `OPENAI_API_KEY`).
   This is how the CopilotKit showcase points at a mock LLM, and how you'd target a
   self-hosted OpenAI-compatible server.
+
+**Tool startup scope:** built-in and enabled general-plugin tools are supported.
+This standalone launcher does not currently discover or start configured MCP
+servers; selecting an MCP toolset does not establish that connection. The
+existing Hermes MCP client is separate from the AG-UI frontend-tool relay.
+Configured MCP lifecycle/approval integration needs its own validation before
+it is advertised as supported here.
 
 Example — point at a local OpenAI-compatible endpoint instead of your Hermes
 config:
@@ -103,7 +168,7 @@ agui:
 ```
 
 ```bash
-OPENAI_API_KEY=sk-… hermes agui   # OPENAI_API_KEY is a secret, so it stays in the environment
+OPENAI_API_KEY=sk-… python -m agui_adapter
 ```
 
 ## Security
@@ -196,11 +261,13 @@ token/Host checks are enforced against that value.
 
 ```
 POST /  (RunAgentInput JSON)
-  → translate.prepare_run(messages, context)   # AG-UI → Hermes history
-  → session.build_run_agent(...)               # merge frontend + state-writer tool schemas; register handlers
-  → AIAgent.run_conversation(...) on a worker thread
+  → acquire the conversation lease (one active turn per thread)
+  → first turn: translate input and build the agent with stable tool schemas
+  → later user turns: reuse that agent and its canonical returned messages
+  → AIAgent.run_conversation(...) on a context-preserving worker thread
         text/reasoning → events.AGUIEventBridge → asyncio.Queue → SSE frames (live)
-        tool events    → derived from the returned messages (real model ids)
+        frontend tool → publish real call id, park worker, finish HTTP run
+        matching result on a new HTTP run → unblock the same worker
         state snapshot → StateSnapshotEvent after each state-writer tool call
   RUN_STARTED … RUN_FINISHED | RUN_ERROR
 ```
@@ -214,27 +281,50 @@ exposes.
   `TEXT_MESSAGE_*` / `REASONING_MESSAGE_*`; tool calls as `TOOL_CALL_*`.
 - **Frontend (client-executed) tools** — tools in `RunAgentInput.tools` are
   advertised to the model but never run server-side. Each frontend tool name is
-  registered with a handler that calls `agent.interrupt()` and returns a
-  placeholder; when the model calls it, the loop unwinds at its next
-  top-of-loop interrupt check, the adapter emits the tool call (real id, no
-  result), and the client executes it and starts a new run with the result.
+  registered with an adapter-local handler that parks its worker. The adapter
+  emits the real call id (no result) and finishes that HTTP run. The client
+  executes it and submits a new run with the matching tool result. No synthetic
+  user message, replacement agent, or model-call replay is involved.
 - **Mixed server + frontend tool calls in one turn** — a batch containing a
   frontend tool is never parallel-safe, so Hermes runs it sequentially; server
-  tools finish and append results before the frontend tool's handler interrupts.
-- **Frontend context** — `RunAgentInput.context[]` is injected as a read-only
-  system message (never merged into the user message, so fixture matching stays
-  deterministic).
-- **Forwarded props (agent config)** — `RunAgentInput.forwarded_props` (e.g.
-  `{tone, expertise}` from `useAgentContext`) is rendered as its own read-only
-  system message per run.
-- **Inbound shared state** — `RunAgentInput.state` is injected as a
-  `Current shared state: <json>` system message.
+  actions execute once, in batch order. An action after the frontend call waits
+  for its result rather than running ahead of the client.
+- **Frontend context, forwarded props and inbound state** — initial data is
+  rendered into leading context messages once. Changed data on later user turns
+  is appended only to the new user content, including multimodal content. A
+  changed continuation payload is appended as an envelope around its tool
+  result. Past context is only rewritten by Hermes' normal compression;
+  tool schemas remain fixed for the life of the conversation.
 - **Multimodal** — image blocks pass through as OpenAI-style content parts;
   pure-text messages stay a plain string.
-- **Resume** — when the history tail is a tool result with no new user turn,
-  `resume_shim.py` (a narrow, flag-gated wrapper around `build_turn_context`)
-  drops the synthetic trailing user turn so the run continues from history. It's
-  a pure pass-through when the resume flag isn't set, keeping core untouched.
+- **Resume** — frontend results reattach to a live worker. Approvals use their
+  separate native `resume[]` interrupt flow. Neither path patches Hermes' turn
+  setup or reconstructs an interrupted turn.
+- **Compression** — the adapter uses Hermes' real compressor and keeps its
+  returned canonical history on following turns. An instance-local prompt-build
+  compatibility guard restores the admitted tool snapshot after Hermes'
+  registry refresh at compaction; it does not replace the compressor or prompt
+  builder. This preserves client/state-writer tools and their exact schemas.
+  Start a new conversation to change the admitted tool contract.
+
+### Conversation lifetime
+
+Conversations and pending work are **process-local**, not durable. Use one
+server worker (or route every request for a thread to the same process).
+Reconnects can resume a live frontend/approval wait; restart, timeout, or idle
+expiry cannot reconstruct it. Cold requests containing prior user turns are
+rejected: start a new thread with a new user request. No automatic replay occurs.
+
+The server keeps canonical model history, not the browser's transcript
+projection. Accepted user history, user/run identities, frontend declarations,
+toolsets and state-writer definitions are validated on subsequent turns. A
+failed/cancelled execution retires its agent. Idle cleanup and shutdown close
+agents under their owning profile context. Capacity rejects new threads rather
+than evicting warm conversations and destroying their cached prefix early.
+Pending approvals belong to the application. Session-scoped approval grants use
+an internal conversation identity, not the client-provided thread id, and are
+cleared when that conversation closes. Separate apps cannot share or consume
+each other's pending decisions or session grants by reusing a thread id.
 
 ### Outbound shared state (state-writer tools)
 
@@ -253,9 +343,9 @@ per run:
 3. **Write** — each declared tool gets a server-side handler that merges the
    call's args into the `RunState` and returns a confirmation (it does *not*
    interrupt), so the model reads the result and continues.
-4. **Emit** — after the run, for each state-writer tool call (in message order),
-   the server emits the normal `TOOL_CALL_*` + `TOOL_CALL_RESULT` followed by a
-   `StateSnapshotEvent` carrying the full merged state as of that call.
+4. **Emit** — after each state-writer tool completes, emit a `StateSnapshotEvent`
+   carrying the full merged state. These internal tools do not emit duplicate
+   chat tool chips; snapshots can arrive before a later frontend handoff.
 
 | demo | tool | declaration |
 |---|---|---|
@@ -276,12 +366,12 @@ declarative mapping).
 ## Tests
 
 ```bash
-pip install -e '.[agui]' && pip install pytest pytest-asyncio
-python -m pytest tests/agui_adapter/ -q
+# Use a PM-prepared development environment with the agui extra.
+scripts/run_tests.sh -j 3 tests/agui_adapter --file-retries 0 --tb=short
 ```
 
 - `test_translate.py`, `test_events.py` — pure unit tests.
-- `test_auth.py`, `test_approvals.py`, `test_resume_shim.py`,
+- `test_auth.py`, `test_approvals.py`, `test_dispatch.py`,
   `test_tool_name_collisions.py` — security + lifecycle.
 - `test_e2e_aimock.py` — end-to-end against a real
   [`@copilotkit/aimock`](https://www.npmjs.com/package/@copilotkit/aimock)
@@ -291,7 +381,7 @@ python -m pytest tests/agui_adapter/ -q
   ```bash
   mkdir -p tests/agui_adapter/.aimock && cd tests/agui_adapter/.aimock
   echo '{"name":"aimock-fixture","private":true}' > package.json
-  npm i @copilotkit/aimock
+  npm i @copilotkit/aimock@1.45.1
   ```
 
   Write that `package.json` first, and write it by hand — both details matter.
@@ -300,3 +390,12 @@ python -m pytest tests/agui_adapter/ -q
   still skipping. And `npm init -y` can't generate it here: it defaults the
   package name to the directory name, which npm rejects as invalid because
   `.aimock` starts with a dot. `.aimock/` is gitignored.
+
+- `test_modernization_probe.py`, `test_parked_frontend.py`,
+  `test_conversations.py`, `test_compression.py`, `test_approval_ownership.py` —
+  real AIAgent, dispatch, approval, compression, HTTP/SSE and
+  canonical-history contracts against a deterministic loopback model endpoint.
+  These are not evidence of paid-provider or browser-client compatibility.
+- `test_provider_startup.py` — actual subprocess launch paths load a test-owned
+  provider profile, credential and general tool plugin from a temporary Hermes
+  home, then dispatch the tool through a loopback model. No real provider calls.

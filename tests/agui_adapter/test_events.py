@@ -90,19 +90,43 @@ def test_tool_start_then_completion_via_step():
     ]
     start, args, end, result = events
     assert start.tool_call_name == "read_file"
-    assert start.tool_call_id == args.tool_call_id == end.tool_call_id == result.tool_call_id
+    assert (
+        start.tool_call_id
+        == args.tool_call_id
+        == end.tool_call_id
+        == result.tool_call_id
+    )
     assert args.delta == '{"path": "a.py"}'
     assert result.content == "file contents"
+
+
+def test_server_arguments_close_before_execution_result():
+    """TOOL_CALL_END ends argument streaming, not execution or approval."""
+    bridge, events = _bridge()
+    bridge.on_tool_progress("tool.started", "terminal", None, {"command": "ls"})
+    assert _types(events) == [
+        EventType.TOOL_CALL_START,
+        EventType.TOOL_CALL_ARGS,
+        EventType.TOOL_CALL_END,
+    ]
+    call_id = events[0].tool_call_id
+    events.clear()
+    bridge.on_step(2, [{"name": "terminal", "result": "done"}])
+    assert _types(events) == [EventType.TOOL_CALL_RESULT]
+    assert events[0].tool_call_id == call_id
 
 
 def test_parallel_same_name_tools_pair_fifo():
     bridge, events = _bridge()
     bridge.on_tool_progress("tool.started", "read_file", None, {"path": "a"})
     bridge.on_tool_progress("tool.started", "read_file", None, {"path": "b"})
-    bridge.on_step(2, [
-        {"name": "read_file", "result": "RA"},
-        {"name": "read_file", "result": "RB"},
-    ])
+    bridge.on_step(
+        2,
+        [
+            {"name": "read_file", "result": "RA"},
+            {"name": "read_file", "result": "RB"},
+        ],
+    )
 
     starts = [e for e in events if e.type == EventType.TOOL_CALL_START]
     results = [e for e in events if e.type == EventType.TOOL_CALL_RESULT]
@@ -132,7 +156,9 @@ def test_open_text_is_closed_before_tool_call():
 
     types = _types(events)
     # The text message must end before the tool call starts.
-    assert types.index(EventType.TEXT_MESSAGE_END) < types.index(EventType.TOOL_CALL_START)
+    assert types.index(EventType.TEXT_MESSAGE_END) < types.index(
+        EventType.TOOL_CALL_START
+    )
 
 
 def test_text_streams_live_not_buffered():
@@ -143,7 +169,10 @@ def test_text_streams_live_not_buffered():
     bridge.on_text_delta("Hel")
     # As soon as the first delta lands, START + its CONTENT are already emitted
     # (not held until a later flush).
-    assert _types(events) == [EventType.TEXT_MESSAGE_START, EventType.TEXT_MESSAGE_CONTENT]
+    assert _types(events) == [
+        EventType.TEXT_MESSAGE_START,
+        EventType.TEXT_MESSAGE_CONTENT,
+    ]
     bridge.on_text_delta("lo ")
     bridge.on_text_delta("there")
     contents = [e for e in events if e.type == EventType.TEXT_MESSAGE_CONTENT]
@@ -155,7 +184,7 @@ def test_text_streams_live_not_buffered():
 
 def test_server_tool_interleaves_text_card_text():
     """Server tool: preamble text streams, then the card streams live
-    (START/ARGS on tool.started, END/RESULT on the next step), then the model's
+    (START/ARGS/END on tool.started, RESULT on the next step), then the model's
     follow-up narration streams — all in DOM order, no buffering."""
     bridge, events = _bridge()
     # Iteration N: preamble narration streams live.
@@ -171,13 +200,13 @@ def test_server_tool_interleaves_text_card_text():
     types = _types(events)
     assert types == [
         EventType.TEXT_MESSAGE_START,
-        EventType.TEXT_MESSAGE_CONTENT,   # preamble
-        EventType.TEXT_MESSAGE_END,       # closed before the tool card
+        EventType.TEXT_MESSAGE_CONTENT,  # preamble
+        EventType.TEXT_MESSAGE_END,  # closed before the tool card
         EventType.TOOL_CALL_START,
         EventType.TOOL_CALL_ARGS,
         EventType.TOOL_CALL_END,
         EventType.TOOL_CALL_RESULT,
-        EventType.TEXT_MESSAGE_START,     # follow-up narration, AFTER the card
+        EventType.TEXT_MESSAGE_START,  # follow-up narration, AFTER the card
         EventType.TEXT_MESSAGE_CONTENT,
         EventType.TEXT_MESSAGE_END,
     ]
@@ -186,11 +215,13 @@ def test_server_tool_interleaves_text_card_text():
 
 
 def test_frontend_tool_skipped_in_live_path():
-    """Frontend/client tools are owned by the server's post-run handoff (real
+    """Frontend/client tools are owned by the relay's dispatch-time handoff (real
     model ids), so the live path emits NO TOOL_CALL_* events for them."""
     bridge, events = _bridge()
     bridge.set_tool_classes(frontend_names={"change_background"})
-    bridge.on_tool_progress("tool.started", "change_background", None, {"background": "#fff"})
+    bridge.on_tool_progress(
+        "tool.started", "change_background", None, {"background": "#fff"}
+    )
     # A completion for it arriving on the next step is likewise ignored.
     bridge.on_step(2, [{"name": "change_background", "result": "ok"}])
     assert events == []
@@ -215,7 +246,9 @@ def test_mixed_batch_server_tool_flushed_on_interrupt():
     bridge.set_tool_classes(frontend_names={"change_background"})
     # Live: server tool starts (frontend tool is skipped in the live path).
     bridge.on_tool_progress("tool.started", "echo_server", None, {"text": "hi"})
-    bridge.on_tool_progress("tool.started", "change_background", None, {"background": "#fff"})
+    bridge.on_tool_progress(
+        "tool.started", "change_background", None, {"background": "#fff"}
+    )
     # No step_callback (run unwound via interrupt). Server flushes from messages.
     from collections import deque
 
@@ -252,10 +285,8 @@ def test_close_open_closes_dangling_text_on_error():
     assert events == []
 
 
-def test_close_open_closes_multiple_dangling_tools_on_error():
-    """A parallel server-tool batch that dies before on_step pairs any
-    completion leaves several TOOL_CALL starts open; close_open force-closes
-    each with a bare TOOL_CALL_END (no result — the run failed)."""
+def test_error_does_not_duplicate_tool_end_or_fabricate_results():
+    """Complete arguments are already closed, even when execution fails."""
     bridge, events = _bridge()
     bridge.on_tool_progress("tool.started", "get_weather", None, {"city": "SF"})
     bridge.on_tool_progress("tool.started", "get_stock_price", None, {"ticker": "AAPL"})
@@ -263,19 +294,20 @@ def test_close_open_closes_multiple_dangling_tools_on_error():
 
     bridge.close_open()
 
-    assert _types(events) == [EventType.TOOL_CALL_END, EventType.TOOL_CALL_END]
+    assert events == []
+    bridge.on_step(2, [{"name": "get_weather", "result": "late result"}])
+    assert events == [], "error must abandon pending result correlations"
 
 
-def test_finish_leaves_tool_open_but_close_open_force_closes_it():
-    """``finish`` (success path) closes only text/reasoning and intentionally
-    leaves tool starts open for on_step/flush; ``close_open`` (error path) is
-    the one that force-closes them."""
+def test_finish_preserves_pending_results_without_reending_arguments():
+    """Finishing an HTTP leg must retain result correlation for resume."""
     bridge, events = _bridge()
     bridge.on_tool_progress("tool.started", "get_weather", None, {"city": "SF"})
     events.clear()
 
     bridge.finish()
-    assert events == []  # finish does NOT close the open tool call
+    assert events == []
 
-    bridge.close_open()
-    assert _types(events) == [EventType.TOOL_CALL_END]
+    bridge.on_step(2, [{"name": "get_weather", "result": "sunny"}])
+    assert _types(events) == [EventType.TOOL_CALL_RESULT]
+    assert events[0].content == "sunny"

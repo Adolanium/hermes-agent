@@ -1,10 +1,14 @@
 import concurrent.futures
 from types import SimpleNamespace
 
+import pytest
+
 from agui_adapter import approvals
 
-# The autouse `_clean_parked_registry` fixture (tests/agui_adapter/conftest.py)
-# clears approvals._parked around every test in this package.
+
+@pytest.fixture
+def registry():
+    return approvals.ApprovalRegistry()
 
 
 def _entry(interrupt_id, status, payload=None):
@@ -12,17 +16,23 @@ def _entry(interrupt_id, status, payload=None):
 
 
 def test_resolved_approved_once():
-    r = approvals.resume_to_decision([_entry("i1", "resolved", {"approved": True})], "i1")
+    r = approvals.resume_to_decision(
+        [_entry("i1", "resolved", {"approved": True})], "i1"
+    )
     assert r == "once"
 
 
 def test_resolved_approved_session_scope():
-    r = approvals.resume_to_decision([_entry("i1", "resolved", {"approved": True, "scope": "session"})], "i1")
+    r = approvals.resume_to_decision(
+        [_entry("i1", "resolved", {"approved": True, "scope": "session"})], "i1"
+    )
     assert r == "session"
 
 
 def test_resolved_not_approved_is_deny():
-    r = approvals.resume_to_decision([_entry("i1", "resolved", {"approved": False})], "i1")
+    r = approvals.resume_to_decision(
+        [_entry("i1", "resolved", {"approved": False})], "i1"
+    )
     assert r == "deny"
 
 
@@ -31,19 +41,24 @@ def test_cancelled_is_deny():
 
 
 def test_unaddressed_interrupt_is_deny():
-    assert approvals.resume_to_decision([_entry("other", "resolved", {"approved": True})], "i1") == "deny"
+    assert (
+        approvals.resume_to_decision(
+            [_entry("other", "resolved", {"approved": True})], "i1"
+        )
+        == "deny"
+    )
 
 
-def test_registry_register_take_is_pop():
+def test_registry_register_take_is_pop(registry):
     fut = concurrent.futures.Future()
     p = approvals.PendingApproval("i1", "rm -rf x", "danger", None, True, fut)
     run = approvals.ParkedRun("t1", object(), p)
-    approvals.register(run)
-    assert approvals.take("t1") is run
-    assert approvals.take("t1") is None  # popped
+    registry.register(run)
+    assert registry.take("t1") is run
+    assert registry.take("t1") is None  # popped
 
 
-def test_register_refuses_concurrent_same_thread():
+def test_register_refuses_concurrent_same_thread(registry):
     fut_a = concurrent.futures.Future()
     p_a = approvals.PendingApproval("i1", "rm -rf a", "danger", None, True, fut_a)
     run_a = approvals.ParkedRun("t1", object(), p_a)
@@ -52,44 +67,55 @@ def test_register_refuses_concurrent_same_thread():
     p_b = approvals.PendingApproval("i2", "rm -rf b", "danger", None, True, fut_b)
     run_b = approvals.ParkedRun("t1", object(), p_b)
 
-    assert approvals.register(run_a) is True
-    assert approvals.register(run_b) is False
+    assert registry.register(run_a) is True
+    assert registry.register(run_b) is False
     # The first registration is NOT overwritten by the refused second one.
-    assert approvals.take("t1") is run_a
+    assert registry.take("t1") is run_a
 
 
-def test_discard_is_identity_scoped():
+def test_discard_is_identity_scoped(registry):
     fut = concurrent.futures.Future()
     p = approvals.PendingApproval("i1", "rm -rf x", "danger", None, True, fut)
     run_a = approvals.ParkedRun("t1", object(), p)
-    approvals.register(run_a)
+    registry.register(run_a)
 
     other_fut = concurrent.futures.Future()
-    other_p = approvals.PendingApproval("i2", "rm -rf y", "danger", None, True, other_fut)
+    other_p = approvals.PendingApproval(
+        "i2", "rm -rf y", "danger", None, True, other_fut
+    )
     other_run = approvals.ParkedRun("t1", object(), other_p)
 
     # Discarding with a mismatched identity leaves the registered run in place.
-    approvals.discard("t1", expected=other_run)
-    assert approvals.take("t1") is run_a
+    registry.discard("t1", expected=other_run)
+    assert registry.take("t1") is run_a
 
     # Re-register (take() above popped it) and discard with the correct identity.
-    approvals.register(run_a)
-    approvals.discard("t1", expected=run_a)
-    assert approvals.take("t1") is None
+    registry.register(run_a)
+    registry.discard("t1", expected=run_a)
+    assert registry.take("t1") is None
 
 
 def test_response_schema_excludes_always_when_not_permanent():
-    assert approvals.approval_response_schema(False)["properties"]["scope"]["enum"] == ["once", "session"]
-    assert approvals.approval_response_schema(True)["properties"]["scope"]["enum"] == ["once", "session", "always"]
+    assert approvals.approval_response_schema(False)["properties"]["scope"]["enum"] == [
+        "once",
+        "session",
+    ]
+    assert approvals.approval_response_schema(True)["properties"]["scope"]["enum"] == [
+        "once",
+        "session",
+        "always",
+    ]
 
 
-def test_approval_callback_emits_interrupt_then_returns_resolved_decision():
+def test_approval_callback_emits_interrupt_then_returns_resolved_decision(registry):
     import threading, time
 
     emitted = []
     cb = approvals.make_approval_callback(
+        registry=registry,
         thread_id="t1",
-        emit=emitted.append, queue=object(),
+        emit=emitted.append,
+        queue=object(),
         last_tool_call_id=lambda: "tc-1",
         new_id=lambda p: "int-1",
         timeout=5.0,
@@ -100,14 +126,15 @@ def test_approval_callback_emits_interrupt_then_returns_resolved_decision():
     # hold up interpreter shutdown (the finally still resolves it on the normal
     # and most failure paths).
     th = threading.Thread(
-        target=lambda: box.__setitem__("d", cb("rm -rf build", "danger")), daemon=True)
+        target=lambda: box.__setitem__("d", cb("rm -rf build", "danger")), daemon=True
+    )
     th.start()
 
     parked = None
     try:
         # Wait for the callback to register the parked run + emit the lifecycle.
         for _ in range(200):
-            parked = approvals.take("t1")
+            parked = registry.take("t1")
             if parked is not None:
                 break
             time.sleep(0.01)
@@ -122,7 +149,11 @@ def test_approval_callback_emits_interrupt_then_returns_resolved_decision():
         # Emitted: a single (PARK, interrupt) tuple.
         assert emitted[0][0] is approvals.PARK
         intr = emitted[0][1]
-        assert intr.id == "int-1" and intr.reason == "tool_call" and intr.tool_call_id == "tc-1"
+        assert (
+            intr.id == "int-1"
+            and intr.reason == "tool_call"
+            and intr.tool_call_id == "tc-1"
+        )
         assert "rm -rf build" in (intr.message or "")
 
         # Resolve → callback returns the decision.
@@ -142,9 +173,7 @@ def test_approval_callback_emits_interrupt_then_returns_resolved_decision():
 
 def test_unexpected_status_is_deny():
     # Any non-"resolved" status (including an unexpected/future one) fails closed.
-    r = approvals.resume_to_decision(
-        [_entry("i1", "weird", {"approved": True})], "i1"
-    )
+    r = approvals.resume_to_decision([_entry("i1", "weird", {"approved": True})], "i1")
     assert r == "deny"
 
 
@@ -156,9 +185,7 @@ def test_approved_non_boolean_is_deny():
     )
     assert r == "deny"
 
-    r2 = approvals.resume_to_decision(
-        [_entry("i1", "resolved", {"approved": 1})], "i1"
-    )
+    r2 = approvals.resume_to_decision([_entry("i1", "resolved", {"approved": 1})], "i1")
     assert r2 == "deny"
 
 
@@ -183,15 +210,23 @@ def test_resume_skips_non_matching_entry():
 def test_non_dict_payload_is_deny():
     # A non-dict payload (e.g. a bare string or list, from a malformed/hostile
     # resume body) must fail closed to "deny" WITHOUT raising.
-    assert approvals.resume_to_decision(
-        [SimpleNamespace(interrupt_id="i1", status="resolved", payload="approved")], "i1"
-    ) == "deny"
-    assert approvals.resume_to_decision(
-        [SimpleNamespace(interrupt_id="i1", status="resolved", payload=[1, 2])], "i1"
-    ) == "deny"
+    assert (
+        approvals.resume_to_decision(
+            [SimpleNamespace(interrupt_id="i1", status="resolved", payload="approved")],
+            "i1",
+        )
+        == "deny"
+    )
+    assert (
+        approvals.resume_to_decision(
+            [SimpleNamespace(interrupt_id="i1", status="resolved", payload=[1, 2])],
+            "i1",
+        )
+        == "deny"
+    )
 
 
-def test_approval_log_uses_redacted_command(caplog):
+def test_approval_log_uses_redacted_command(caplog, registry):
     # The "awaiting approval" INFO line must log the secret-redacted, truncated
     # command (the server-side audit record), never the raw command.
     import logging
@@ -200,50 +235,74 @@ def test_approval_log_uses_redacted_command(caplog):
 
     cmd = "curl -H 'Authorization: Bearer supersecrettoken123' https://x"
     cb = approvals.make_approval_callback(
-        thread_id="t-log", emit=lambda e: None, queue=object(),
-        last_tool_call_id=lambda: "tc", new_id=lambda *_: "int", timeout=0.05)
+        registry=registry,
+        thread_id="t-log",
+        emit=lambda e: None,
+        queue=object(),
+        last_tool_call_id=lambda: "tc",
+        new_id=lambda *_: "int",
+        timeout=0.05,
+    )
     with caplog.at_level(logging.INFO, logger="agui_adapter.approvals"):
         assert cb(cmd, "danger") == "deny"  # logs, parks, times out -> deny
     logged = " ".join(r.getMessage() for r in caplog.records)
     expected = redact_sensitive_text(cmd, force=True)[:80]
     assert expected in logged  # the log used the force-redacted+truncated form
-    if expected != cmd[:80]:   # if redaction scrubbed it, the raw secret is gone
+    if expected != cmd[:80]:  # if redaction scrubbed it, the raw secret is gone
         assert "supersecrettoken123" not in logged
 
 
-def test_callback_timeout_returns_deny():
+def test_callback_timeout_returns_deny(registry):
     # Fail-closed core ("silence != consent"): with no resume, the callback's
     # decision future times out and it returns "deny", clearing its parked
     # entry — verifying the returned decision VALUE, not just that the registry
     # cleared. Called synchronously (it blocks ~timeout then denies).
     emitted = []
     cb = approvals.make_approval_callback(
-        thread_id="t-timeout", emit=emitted.append, queue=object(),
-        last_tool_call_id=lambda: "tc", new_id=lambda *_: "int", timeout=0.05)
+        registry=registry,
+        thread_id="t-timeout",
+        emit=emitted.append,
+        queue=object(),
+        last_tool_call_id=lambda: "tc",
+        new_id=lambda *_: "int",
+        timeout=0.05,
+    )
     assert cb("rm -rf build", "danger") == "deny"
-    assert not approvals.is_parked("t-timeout")  # self-cleaned on timeout
+    assert not registry.is_parked("t-timeout")  # self-cleaned on timeout
     assert emitted and emitted[0][0] is approvals.PARK  # interrupt was surfaced
 
 
-def test_callback_denies_when_thread_already_parked():
+def test_callback_denies_when_thread_already_parked(registry):
     # Fail-closed at the callback level: if a run is already parked for this
     # thread_id, a second dangerous command on the same thread must deny
     # (register() refuses to overwrite) rather than clobber the pending
     # approval or block. Returns synchronously with no PARK emitted.
     fut = concurrent.futures.Future()
-    approvals.register(approvals.ParkedRun(
-        "t-busy", object(),
-        approvals.PendingApproval("i0", "rm -rf a", "d", None, True, fut)))
+    registry.register(
+        approvals.ParkedRun(
+            "t-busy",
+            object(),
+            approvals.PendingApproval("i0", "rm -rf a", "d", None, True, fut),
+        )
+    )
 
     emitted = []
     cb = approvals.make_approval_callback(
-        thread_id="t-busy", emit=emitted.append, queue=object(),
-        last_tool_call_id=lambda: "tc", new_id=lambda *_: "int", timeout=5.0)
+        registry=registry,
+        thread_id="t-busy",
+        emit=emitted.append,
+        queue=object(),
+        last_tool_call_id=lambda: "tc",
+        new_id=lambda *_: "int",
+        timeout=5.0,
+    )
     assert cb("rm -rf b", "danger") == "deny"
     assert emitted == []  # nothing parked → no interrupt emitted
 
 
-def test_dangerous_command_reaches_interactive_callback_not_gateway_fallback(monkeypatch):
+def test_dangerous_command_reaches_interactive_callback_not_gateway_fallback(
+    monkeypatch,
+):
     """Regression guard for the platform="agui" routing bug.
 
     _run_turn bootstraps a dangerous command's approval by installing a
@@ -266,12 +325,12 @@ def test_dangerous_command_reaches_interactive_callback_not_gateway_fallback(mon
     guard that a regression in _run_turn's OWN bootstrap can't slip through is
     test_e2e_aimock.py::test_interrupt_via_real_guard_dispatcher_end_to_end.
     """
-    from tools import approval as _approval
+    from tools import approval as _approval, approval_context as _approval_context
     from gateway.session_context import set_session_vars, clear_session_vars
 
     # Deterministic manual-approval mode (not off/yolo/smart), so the guard
     # reaches the interactive prompt path rather than auto-approving/denying.
-    monkeypatch.setattr(_approval, "_get_approval_mode", lambda: "manual")
+    monkeypatch.setattr(_approval_context, "_get_approval_mode", lambda: "manual")
 
     calls = []
 
@@ -281,7 +340,7 @@ def test_dangerous_command_reaches_interactive_callback_not_gateway_fallback(mon
         calls.append((command, allow_permanent))
         return "deny"  # fail-closed decision; the assertion is that WE ran
 
-    interactive_token = _approval.set_hermes_interactive_context(True)
+    interactive_token = _approval_context.set_hermes_interactive_context(True)
     # NOTE: no platform= — exactly what the fixed _run_turn does.
     session_tokens = set_session_vars(session_key="t-guard-route", async_delivery=False)
     try:
@@ -290,7 +349,7 @@ def test_dangerous_command_reaches_interactive_callback_not_gateway_fallback(mon
         )
     finally:
         clear_session_vars(session_tokens)
-        _approval.reset_hermes_interactive_context(interactive_token)
+        _approval_context.reset_hermes_interactive_context(interactive_token)
 
     # The interactive callback fired => the CLI branch was reached.
     assert calls == [("rm -rf build", True)], (

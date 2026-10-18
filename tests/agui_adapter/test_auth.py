@@ -1,6 +1,8 @@
 import pytest
 from agui_adapter import auth
 
+TEST_TOKEN = "u5D9mW4xR7qT2nK8vH6cB3sF0aL1pZ4e"
+
 
 def test_loopback_without_token_is_allowed():
     # 127.0.0.1 + no token → no raise (OS boundary is the auth)
@@ -18,7 +20,7 @@ def test_non_loopback_with_weak_token_refuses_to_start():
 
 
 def test_non_loopback_with_strong_token_is_allowed():
-    auth.require_token_or_refuse("0.0.0.0", "x" * 32)
+    auth.require_token_or_refuse("0.0.0.0", TEST_TOKEN)
 
 
 from fastapi.testclient import TestClient
@@ -26,17 +28,28 @@ from agui_adapter.server import create_app
 
 
 def _run_body():
-    return {"threadId": "t1", "runId": "r1", "state": {}, "messages": [],
-            "tools": [], "context": [], "forwardedProps": {}}
+    return {
+        "threadId": "t1",
+        "runId": "r1",
+        "state": {},
+        "messages": [],
+        "tools": [],
+        "context": [],
+        "forwardedProps": {},
+    }
 
 
 def test_health_is_open_even_with_token():
-    client = TestClient(create_app(session_token="x" * 32), base_url="http://127.0.0.1")
+    client = TestClient(
+        create_app(session_token=TEST_TOKEN), base_url="http://127.0.0.1"
+    )
     assert client.get("/health").status_code == 200
 
 
 def test_post_without_token_is_401_when_token_configured():
-    client = TestClient(create_app(session_token="x" * 32), base_url="http://127.0.0.1")
+    client = TestClient(
+        create_app(session_token=TEST_TOKEN), base_url="http://127.0.0.1"
+    )
     r = client.post("/", json=_run_body())
     assert r.status_code == 401
 
@@ -44,12 +57,20 @@ def test_post_without_token_is_401_when_token_configured():
 def _stub_agent(monkeypatch):
     """Stub the agent so an authorized POST completes instantly and offline,
     instead of driving a full (slow, network-dependent) agent turn."""
-    import agui_adapter.server as server
+    from agui_adapter import server
 
     class _Fake:
+        def close(self):
+            pass
+
         def __init__(self):
-            for a in ("stream_delta_callback", "reasoning_callback",
-                      "tool_progress_callback", "step_callback", "thinking_callback"):
+            for a in (
+                "stream_delta_callback",
+                "reasoning_callback",
+                "tool_progress_callback",
+                "step_callback",
+                "thinking_callback",
+            ):
                 setattr(self, a, None)
 
         def run_conversation(self, *a, **k):
@@ -60,8 +81,12 @@ def _stub_agent(monkeypatch):
 
 def test_post_with_header_token_is_authorized(monkeypatch):
     _stub_agent(monkeypatch)
-    client = TestClient(create_app(session_token="x" * 32), base_url="http://127.0.0.1")
-    r = client.post("/", json=_run_body(), headers={"X-Hermes-Session-Token": "x" * 32})
+    client = TestClient(
+        create_app(session_token=TEST_TOKEN), base_url="http://127.0.0.1"
+    )
+    r = client.post(
+        "/", json=_run_body(), headers={"X-Hermes-Session-Token": TEST_TOKEN}
+    )
     # 200 proves the request passed the auth/Host/content-type gating and began
     # streaming (the endpoint returns a StreamingResponse, whose status is fixed
     # at 200 once streaming starts — a worker-level failure would surface as a
@@ -72,8 +97,10 @@ def test_post_with_header_token_is_authorized(monkeypatch):
 
 def test_post_with_query_token_is_authorized(monkeypatch):
     _stub_agent(monkeypatch)
-    client = TestClient(create_app(session_token="x" * 32), base_url="http://127.0.0.1")
-    r = client.post("/?token=" + "x" * 32, json=_run_body())
+    client = TestClient(
+        create_app(session_token=TEST_TOKEN), base_url="http://127.0.0.1"
+    )
+    r = client.post("/?token=" + TEST_TOKEN, json=_run_body())
     assert r.status_code == 200
 
 
@@ -88,7 +115,9 @@ def test_post_with_wrong_token_is_401():
     # Loopback bind WITH a configured token: a mismatched token must still be
     # rejected via the hmac.compare_digest mismatch path (not the "no token
     # supplied" path), for both the header and query-param carriers.
-    client = TestClient(create_app(session_token="x" * 32), base_url="http://127.0.0.1")
+    client = TestClient(
+        create_app(session_token=TEST_TOKEN), base_url="http://127.0.0.1"
+    )
     r = client.post("/", json=_run_body(), headers={"X-Hermes-Session-Token": "y" * 32})
     assert r.status_code == 401
     r2 = client.post("/?token=" + "y" * 32, json=_run_body())
@@ -135,6 +164,7 @@ def test_host_accepted_bare_ipv6_loopback():
 
 # --- create_app() fail-closed wiring (not just the standalone helper) -------
 
+
 def test_create_app_refuses_non_loopback_without_token():
     # The embedder "refuse to start" guard: create_app must couple bound_host
     # into require_token_or_refuse, so a network-accessible bind with no token
@@ -145,7 +175,7 @@ def test_create_app_refuses_non_loopback_without_token():
 
 def test_create_app_builds_non_loopback_with_strong_token():
     # Same wiring, satisfied: a strong token on a network bind builds cleanly.
-    app = create_app(session_token="x" * 32, bound_host="0.0.0.0")
+    app = create_app(session_token=TEST_TOKEN, bound_host="0.0.0.0")
     assert app is not None
 
 
@@ -160,8 +190,9 @@ def test_bad_host_header_rejected_on_post_route():
 
 # --- entry.main(): the authoritative fail-closed guard ----------------------
 
+
 def test_entry_main_refuses_non_loopback_without_token(monkeypatch):
-    import agui_adapter.entry as entry
+    from agui_adapter import entry
 
     called = {}
     monkeypatch.setattr("uvicorn.run", lambda *a, **k: called.setdefault("run", True))
@@ -180,7 +211,7 @@ def test_entry_main_passes_same_host_to_guard_and_uvicorn(monkeypatch):
     # wide, no token) is covered by test_entry_main_refuses_non_loopback_...
     # above; main() uses a single `host` local for all call sites, so the two
     # cannot decouple without a rewrite.
-    import agui_adapter.entry as entry
+    from agui_adapter import entry
 
     captured = {}
 
@@ -189,13 +220,58 @@ def test_entry_main_passes_same_host_to_guard_and_uvicorn(monkeypatch):
         captured.update(k)
 
     monkeypatch.setattr("uvicorn.run", _fake_run)
-    monkeypatch.setenv("HERMES_AGUI_SESSION_TOKEN", "x" * 32)
+    monkeypatch.setenv("HERMES_AGUI_SESSION_TOKEN", TEST_TOKEN)
     entry.main(host="0.0.0.0")
     assert captured["host"] == "0.0.0.0"
     assert captured["app"] is not None  # create_app(bound_host="0.0.0.0", token) built
 
 
 # --- _usable(): placeholder/entropy floor, including the ImportError fallback
+
+
+def test_entry_main_uses_owning_secret_scope_not_launch_environment(monkeypatch):
+    from agent.secret_scope import set_secret_scope, reset_secret_scope
+    from agui_adapter import entry
+
+    monkeypatch.setenv(
+        "HERMES_AGUI_SESSION_TOKEN", "launch-profile-token-should-not-leak"
+    )
+    captured = {}
+    monkeypatch.setattr(
+        "agui_adapter.server.create_app", lambda **kwargs: captured.update(kwargs)
+    )
+    monkeypatch.setattr("uvicorn.run", lambda *args, **kwargs: None)
+    token = set_secret_scope({"HERMES_AGUI_SESSION_TOKEN": TEST_TOKEN})
+    try:
+        entry.main(host="0.0.0.0")
+    finally:
+        reset_secret_scope(token)
+    assert captured["session_token"] == TEST_TOKEN
+
+
+def test_standalone_startup_loads_profile_dotenv_credentials(monkeypatch):
+    from agui_adapter import entry
+    from agui_adapter.session import AgentConfig
+    from hermes_cli.config import save_env_value
+
+    save_env_value("HERMES_AGUI_SESSION_TOKEN", TEST_TOKEN)
+    save_env_value("OPENAI_API_KEY", "fake-model-credential-from-profile-file")
+    # Saving publishes to the current process; discard that mirror to model
+    # a fresh standalone launch that has only the on-disk profile credentials.
+    monkeypatch.delenv("HERMES_AGUI_SESSION_TOKEN", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    captured = {}
+
+    def create(**kwargs):
+        captured.update(kwargs)
+        captured["api_key"] = AgentConfig().api_key
+
+    monkeypatch.setattr("agui_adapter.server.create_app", create)
+    monkeypatch.setattr("uvicorn.run", lambda *args, **kwargs: None)
+    entry.main(host="0.0.0.0")
+    assert captured["session_token"] == TEST_TOKEN
+    assert captured["api_key"] == "fake-model-credential-from-profile-file"
+
 
 def test_usable_rejects_placeholders_and_accepts_strong():
     assert auth._usable(None) is False
@@ -204,7 +280,7 @@ def test_usable_rejects_placeholders_and_accepts_strong():
     # placeholder (not merely for length) on the primary has_usable_secret
     # path — "your_api_key_here" (17 chars) is in hermes_cli's placeholder set.
     assert auth._usable("your_api_key_here") is False
-    assert auth._usable("x" * 32) is True
+    assert auth._usable(TEST_TOKEN) is True
 
 
 def test_create_app_neutralizes_interrupt_preempting_env(monkeypatch):
@@ -230,8 +306,10 @@ def test_usable_import_error_fallback_still_rejects_placeholders(monkeypatch):
     import sys
     import types
 
-    monkeypatch.setitem(sys.modules, "hermes_cli.auth", types.ModuleType("hermes_cli.auth"))
+    monkeypatch.setitem(
+        sys.modules, "hermes_cli.auth", types.ModuleType("hermes_cli.auth")
+    )
     assert auth._usable("changeme00000000") is False
     assert auth._usable("your_api_key_here") is False
     assert auth._usable("short") is False
-    assert auth._usable("x" * 32) is True
+    assert auth._usable(TEST_TOKEN) is True

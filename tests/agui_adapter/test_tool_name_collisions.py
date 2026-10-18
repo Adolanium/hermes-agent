@@ -7,6 +7,7 @@ client.  ``_reject_name_collisions`` fails the run instead; these tests pin
 that behaviour, including the two ways a naive check gets it wrong (rejecting
 the adapter's own re-registered names, and missing intra-run duplicates).
 """
+
 import pytest
 
 from agui_adapter.session import (
@@ -27,7 +28,7 @@ def registry():
     ``build_run_agent`` relies on.  Without this the registry is empty and
     every collision assertion below would pass vacuously.
     """
-    import run_agent  # noqa: F401  - imported for its registration side effect
+    import run_agent
 
     from tools.registry import registry as _registry
 
@@ -44,8 +45,11 @@ def adapter_registration(registry):
         registry.register(
             name=name,
             toolset=toolset,
-            schema={"name": name, "description": "x",
-                    "parameters": {"type": "object", "properties": {}}},
+            schema={
+                "name": name,
+                "description": "x",
+                "parameters": {"type": "object", "properties": {}},
+            },
             handler=lambda args, **kwargs: "",
             check_fn=lambda: True,
         )
@@ -97,7 +101,9 @@ class TestRejectsServerToolNames:
 
 class TestAllowsLegitimateDeclarations:
     def test_non_colliding_names_pass(self, registry):
-        _reject_name_collisions({"ui_confirm", "ui_pick_date"}, {"set_theme"})
+        _reject_name_collisions(
+            {"ui_confirm", "ui_pick_date"}, {"agui_test_state_theme"}
+        )
 
     def test_empty_declarations_pass(self, registry):
         _reject_name_collisions(set(), set())

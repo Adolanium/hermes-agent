@@ -1,49 +1,38 @@
-"""Per-run Hermes agent construction for the AG-UI adapter.
+"""Hermes agent construction and run-scoped tool dispatch for AG-UI.
 
-AG-UI is stateless per run: the client sends the full message list every time,
-so the adapter rebuilds the conversation from ``RunAgentInput.messages`` each
-run rather than holding server-side history.
+The server retains one agent and canonical history per live conversation.
+A frontend-tool continuation stays in its original worker and does not
+reconstruct history or inject another user turn.
 
 Frontend (client-executed) tools are implemented WITHOUT any change to Hermes
-core, using the interrupt mechanism Hermes already exposes:
+core. The HTTP server supplies a run-scoped relay that blocks the frontend
+handler until the next HTTP request returns its matching result. Call identity
+comes from Hermes' existing tool-start callback.
 
-* each frontend tool name is registered with a handler that calls
-  ``agent.interrupt()`` and returns a placeholder — so when the model calls it,
-  the tool loop unwinds at its next top-of-loop interrupt check
-  (``conversation_loop.py``) instead of making another model call;
-* the schema is merged into ``agent.tools`` / ``valid_tool_names`` so the model
-  sees the tool and the loop does not treat the call as a hallucination.
+Dispatch without a live relay fails closed. Tool schemas are merged into
+``agent.tools`` and ``valid_tool_names`` so the model sees dispatchable tools.
 
 A batch that contains a frontend tool is never all-parallel-safe, so Hermes
-runs it sequentially (``_should_parallelize_tool_batch``). That means any
-server-side tools in the same turn finish and append their results BEFORE the
-frontend tool's handler fires the interrupt — which is what makes mixed
-server+frontend batches deterministic. The adapter reads the resulting
-messages to emit events and to resume.
+runs it sequentially. A server action before a frontend wait completes before
+handoff; an action after it waits for the frontend result. No action is replayed
+by reconstructing an interrupted turn.
 """
 
 from __future__ import annotations
 
 import contextvars
 import copy
-import json
 import logging
-import os
 import threading
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Literal, Optional
 
 logger = logging.getLogger(__name__)
 
-# The agent for the currently-executing run, so the (module-level, shared)
-# frontend-tool handler can interrupt the right agent. Set per run before
-# ``run_conversation``; read on the run's execution thread.
-_CURRENT_AGENT: contextvars.ContextVar[Any] = contextvars.ContextVar("agui_current_agent", default=None)
-
 # The shared-state store for the currently-executing run, so the (module-level,
 # shared) state-writer tool handler can mutate the right run's state. Set per
-# run alongside ``_CURRENT_AGENT``; read on the run's execution thread.
-_CURRENT_STATE: contextvars.ContextVar[Optional["RunState"]] = contextvars.ContextVar(
+# run; read on the run's execution thread.
+_CURRENT_STATE: contextvars.ContextVar[Optional[RunState]] = contextvars.ContextVar(
     "agui_current_state", default=None
 )
 
@@ -76,13 +65,13 @@ class RunState:
     so the server can emit one ``StateSnapshotEvent`` per call, in call order.
     """
 
-    state: Dict[str, Any] = field(default_factory=dict)
-    specs: Dict[str, StateWriterSpec] = field(default_factory=dict)
+    state: dict[str, Any] = field(default_factory=dict)
+    specs: dict[str, StateWriterSpec] = field(default_factory=dict)
     # (tool_call args snapshot) recorded per state-writer invocation, in order.
     # Each entry is the FULL state as it stood right after that tool applied.
-    snapshots: List[Dict[str, Any]] = field(default_factory=list)
+    snapshots: list[dict[str, Any]] = field(default_factory=list)
 
-    def apply(self, tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
+    def apply(self, tool_name: str, args: dict[str, Any]) -> dict[str, Any]:
         """Merge a state-writer tool's args into state; return the new snapshot."""
         spec = self.specs.get(tool_name)
         if spec is not None:
@@ -102,11 +91,6 @@ class RunState:
         self.snapshots.append(snap)
         return snap
 
-# Placeholder tool result returned by a client-side tool. Never surfaced to the
-# client (the adapter emits the tool call without a result and the real result
-# arrives on the next run); only present in history so the interrupted turn
-# stays API-valid.
-CLIENT_TOOL_PLACEHOLDER = json.dumps({"status": "pending_client_execution"})
 
 _registered_frontend_names: set[str] = set()
 _reg_lock = threading.Lock()
@@ -140,7 +124,9 @@ class ToolNameCollisionError(ValueError):
         )
 
 
-def _reject_name_collisions(frontend_names: set[str], state_writer_names: set[str]) -> None:
+def _reject_name_collisions(
+    frontend_names: set[str], state_writer_names: set[str]
+) -> None:
     """Raise :class:`ToolNameCollisionError` if a declaration shadows a server tool.
 
     Call this BEFORE any schema merge or registration. It must also run AFTER
@@ -183,10 +169,13 @@ def _load_agui_config() -> dict:
     """
     try:
         from hermes_cli.config import load_config
+
         section = load_config().get("agui")
         return section if isinstance(section, dict) else {}
-    except Exception:  # noqa: BLE001 - hermes CLI unavailable / bad config is non-fatal
-        logger.debug("load_config() failed for the agui section; using defaults", exc_info=True)
+    except Exception:
+        logger.debug(
+            "load_config() failed for the agui section; using defaults", exc_info=True
+        )
         return {}
 
 
@@ -194,10 +183,10 @@ class AgentConfig:
     """Deployment-level settings shared across runs.
 
     Behavioral settings come from the ``agui`` section of ``config.yaml`` (see
-    ``DEFAULT_CONFIG`` in ``hermes_cli.config``); the only environment input is
-    the session token, which is a secret. By default the adapter plugs into the
+    ``DEFAULT_CONFIG`` in ``hermes_cli.config``); credentials come through the
+    owning profile's secret scope. By default the adapter plugs into the
     local Hermes setup: provider, credentials, and ``api_mode`` are resolved per
-    run from the ``hermes model`` config + auth pools via
+    conversation from the ``hermes model`` config + auth pools via
     ``hermes_cli.runtime_provider.resolve_runtime_provider`` (see
     ``build_run_agent`` / ``_resolve_agent_settings``).
 
@@ -209,6 +198,8 @@ class AgentConfig:
     """
 
     def __init__(self) -> None:
+        from agent.secret_scope import get_secret
+
         cfg = _load_agui_config()
         # Explicit endpoint override (config.yaml `agui.base_url`). When set, the
         # hermes provider resolver is skipped and the agent talks directly to it.
@@ -216,7 +207,7 @@ class AgentConfig:
         # Credentials are secrets, never a behavioral config key: resolved from
         # hermes auth on the resolver path, or OPENAI_API_KEY for an explicit
         # base_url (self-hosted / aimock).
-        self.api_key = os.environ.get("OPENAI_API_KEY")
+        self.api_key = get_secret("OPENAI_API_KEY")
         # Model override; empty means "use the hermes config default model".
         self.model = (cfg.get("model") or "").strip()
         # Provider override; None means "let the hermes config / resolver decide".
@@ -232,14 +223,6 @@ class AgentConfig:
         self.enabled_toolsets = [str(t).strip() for t in toolsets if str(t).strip()]
 
 
-def set_current_agent(agent) -> contextvars.Token:
-    return _CURRENT_AGENT.set(agent)
-
-
-def reset_current_agent(token: contextvars.Token) -> None:
-    _CURRENT_AGENT.reset(token)
-
-
 def set_current_state(state: Optional[RunState]) -> contextvars.Token:
     return _CURRENT_STATE.set(state)
 
@@ -249,16 +232,13 @@ def reset_current_state(token: contextvars.Token) -> None:
 
 
 def _frontend_tool_handler(args, **kwargs) -> str:
-    """Handler shared by every client-side tool: interrupt the run and return a
-    placeholder. The run unwinds without a further model call; the adapter then
-    hands the tool call to the client."""
-    agent = _CURRENT_AGENT.get()
-    if agent is not None:
-        try:
-            agent.interrupt("client-side tool handoff")
-        except Exception:
-            logger.debug("agent.interrupt() failed in frontend tool handler", exc_info=True)
-    return CLIENT_TOOL_PLACEHOLDER
+    """Wait for the matching client result on the original execution thread."""
+    from agui_adapter.continuation import CURRENT_FRONTEND, ContinuationError
+
+    relay = CURRENT_FRONTEND.get()
+    if relay is None:
+        raise ContinuationError("Frontend dispatch requires a live frontend relay.")
+    return relay.execute(args)
 
 
 _STATE_WRITER_CONFIRMATION = "State updated."
@@ -282,13 +262,15 @@ def _make_state_writer_handler(tool_name: str):
             try:
                 run_state.apply(tool_name, args if isinstance(args, dict) else {})
             except Exception:
-                logger.debug("state-writer apply failed for %s", tool_name, exc_info=True)
+                logger.debug(
+                    "state-writer apply failed for %s", tool_name, exc_info=True
+                )
         return _STATE_WRITER_CONFIRMATION
 
     return _handler
 
 
-def _ensure_state_writer_tools_registered(specs: Dict[str, StateWriterSpec]) -> None:
+def _ensure_state_writer_tools_registered(specs: dict[str, StateWriterSpec]) -> None:
     """Register a server-side dispatch handler for each state-writer tool name.
 
     The handler merges the call into the run-scoped state. Registration is
@@ -341,7 +323,11 @@ def _ensure_frontend_tools_registered(names: set[str]) -> None:
             registry.register(
                 name=name,
                 toolset="agui-frontend",
-                schema={"name": name, "description": "client-executed tool", "parameters": {"type": "object", "properties": {}}},
+                schema={
+                    "name": name,
+                    "description": "client-executed tool",
+                    "parameters": {"type": "object", "properties": {}},
+                },
                 handler=_frontend_tool_handler,
                 check_fn=lambda: True,
                 emoji="🖥️",
@@ -377,8 +363,10 @@ def _resolve_agent_settings(config: AgentConfig) -> dict:
     try:
         from hermes_cli.config import load_config
         from hermes_cli.runtime_provider import resolve_runtime_provider
-    except Exception:  # noqa: BLE001 - hermes CLI unavailable; fall back to env
-        logger.debug("hermes runtime resolver unavailable; using env config", exc_info=True)
+    except Exception:
+        logger.debug(
+            "hermes runtime resolver unavailable; using env config", exc_info=True
+        )
         return {
             "provider": config.provider or "custom",
             "model": config.model or "gpt-4o",
@@ -399,8 +387,10 @@ def _resolve_agent_settings(config: AgentConfig) -> dict:
             config_provider = model_cfg.get("provider")
         elif isinstance(model_cfg, str):
             default_model = model_cfg.strip()
-    except Exception:  # noqa: BLE001 - missing/invalid config is non-fatal
-        logger.debug("load_config() failed; proceeding with resolver defaults", exc_info=True)
+    except Exception:
+        logger.debug(
+            "load_config() failed; proceeding with resolver defaults", exc_info=True
+        )
 
     # Model comes from the hermes setup via `model or default_model` — no
     # hardcoded fallback that could mask a missing/mis-set model with a guess
@@ -424,8 +414,11 @@ def _resolve_agent_settings(config: AgentConfig) -> dict:
             command=runtime.get("command"),
             args=list(runtime.get("args") or []),
         )
-    except Exception:  # noqa: BLE001 - surface as a run without creds rather than crash
-        logger.warning("hermes provider resolution failed; agent may lack credentials", exc_info=True)
+    except Exception:
+        logger.warning(
+            "hermes provider resolution failed; agent may lack credentials",
+            exc_info=True,
+        )
 
     # No adapter-level guard on an empty model: `model or default_model` is
     # passed straight through to AIAgent, letting a missing model surface
@@ -436,10 +429,10 @@ def _resolve_agent_settings(config: AgentConfig) -> dict:
 def build_run_agent(
     config: AgentConfig,
     *,
-    frontend_tool_schemas: Optional[List[dict]] = None,
+    frontend_tool_schemas: Optional[list[dict]] = None,
     frontend_tool_names: Optional[set[str]] = None,
-    state_writer_specs: Optional[Dict[str, StateWriterSpec]] = None,
-    state_writer_schemas: Optional[List[dict]] = None,
+    state_writer_specs: Optional[dict[str, StateWriterSpec]] = None,
+    state_writer_schemas: Optional[list[dict]] = None,
     cwd: Optional[str] = None,
     default_headers: Optional[dict] = None,
 ):
@@ -500,6 +493,9 @@ def build_run_agent(
         # frontend tools (name + parameters) so the model can call them.
         _merge_frontend_tools(agent, state_writer_schemas or [], set(specs))
 
+    from agui_adapter.tool_snapshot import pin_tool_snapshot
+
+    pin_tool_snapshot(agent)
     return agent
 
 
@@ -524,20 +520,28 @@ def _expose_tools_eagerly(agent) -> None:
     """
     try:
         import model_tools
-        eager = model_tools.get_tool_definitions(
-            enabled_toolsets=getattr(agent, "enabled_toolsets", None),
-            disabled_toolsets=getattr(agent, "disabled_toolsets", None),
-            quiet_mode=True,
-            skip_tool_search_assembly=True,
-        ) or []
-    except Exception:  # noqa: BLE001 - fall back to whatever agent_init assembled
-        logger.debug("eager tool re-assembly failed; leaving agent.tools as built", exc_info=True)
+
+        eager = (
+            model_tools.get_tool_definitions(
+                enabled_toolsets=getattr(agent, "enabled_toolsets", None),
+                disabled_toolsets=getattr(agent, "disabled_toolsets", None),
+                quiet_mode=True,
+                skip_tool_search_assembly=True,
+            )
+            or []
+        )
+    except Exception:
+        logger.debug(
+            "eager tool re-assembly failed; leaving agent.tools as built", exc_info=True
+        )
         return
     agent.tools = eager
     agent.valid_tool_names = {
         t["function"]["name"]
         for t in eager
-        if isinstance(t, dict) and isinstance(t.get("function"), dict) and t["function"].get("name")
+        if isinstance(t, dict)
+        and isinstance(t.get("function"), dict)
+        and t["function"].get("name")
     }
     invalidate = getattr(agent, "_invalidate_system_prompt", None)
     if callable(invalidate):
@@ -547,10 +551,12 @@ def _expose_tools_eagerly(agent) -> None:
             logger.debug("system-prompt invalidation failed", exc_info=True)
 
 
-def _merge_frontend_tools(agent, schemas: List[dict], names: set[str]) -> None:
+def _merge_frontend_tools(agent, schemas: list[dict], names: set[str]) -> None:
     """Advertise frontend tool schemas to the model (name + real parameters)."""
     existing = list(agent.tools or [])
-    existing_names = {(t.get("function") or {}).get("name") for t in existing if isinstance(t, dict)}
+    existing_names = {
+        (t.get("function") or {}).get("name") for t in existing if isinstance(t, dict)
+    }
     for schema in schemas:
         fn_name = (schema.get("function") or {}).get("name")
         if fn_name and fn_name not in existing_names:

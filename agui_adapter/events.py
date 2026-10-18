@@ -31,16 +31,16 @@ Notable behaviors:
 
 Server-tool events stream LIVE and IN ORDER: ``tool.started`` fires while the
 tool executes (same iteration the model requested it), so the TOOL_CALL_START/
-ARGS land right after any preamble text and BEFORE the model's next-iteration
+ARGS/END land right after any preamble text and BEFORE the model's next-iteration
 follow-up narration. That interleaving is the whole point — it keeps live token
 streaming (text is never buffered) while putting the tool card ahead of the
 narration that comments on its result, matching the north-star DOM order.
 
 The live path is gated to SERVER tools only (:meth:`set_tool_classes`):
 
-* **Frontend/client tools** carry no result on this run — the model call
-  unwinds via interrupt and the client executes them. The server's post-run
-  handoff owns them (real model-issued ids, ``parent_message_id``), so the
+* **Frontend/client tools** carry no result on this HTTP leg — the worker
+  parks while the client executes them. The relay's handoff owns them
+  (real model-issued ids, ``parent_message_id``), so the
   bridge SKIPS them entirely in the live path.
 * **State-writer tools** are INTERNAL: their authoritative UI is the state
   card driven by a ``StateSnapshotEvent``, not a chatty chip. The bridge
@@ -100,24 +100,24 @@ class AGUIEventBridge:
         # a provider path produced no text deltas).
         self.emitted_any_text: bool = False
         # Tool names whose live TOOL_CALL_* events the bridge must NOT emit.
-        # Frontend/client tools are owned by the server's post-run handoff
+        # Frontend/client tools are owned by the relay's dispatch-time handoff
         # (real model ids); state-writer tools are represented by a state card
         # (StateSnapshotEvent), not a chip. Both are suppressed in the live path.
         # Populated per run via ``set_tool_classes``; empty means "every tool is
         # a server tool" (the smoke-script / default case).
-        self._frontend_names: Set[str] = set()
-        self._state_writer_names: Set[str] = set()
+        self._frontend_names: set[str] = set()
+        self._state_writer_names: set[str] = set()
         # Assistant text message currently streaming (None when closed).
         self._text_message_id: Optional[str] = None
         # Thinking message currently streaming (None when closed).
         self._thinking_message_id: Optional[str] = None
         # FIFO of AG-UI tool_call_ids per Hermes tool name, so a completion
         # arriving via step_callback pairs with the right start event.
-        self._tool_ids: Dict[str, Deque[str]] = {}
+        self._tool_ids: dict[str, deque[str]] = {}
         # Real (model-issued) id overrides, keyed by tool name — used for
         # client-side tools whose id must match the assistant message so the
         # returned ToolMessage correlates. See server-side client-tool path.
-        self._id_overrides: Dict[str, Deque[str]] = {}
+        self._id_overrides: dict[str, deque[str]] = {}
         # Most recent server-tool call id started this run — the binding target
         # for an approval interrupt. For the case that matters (a `terminal`
         # command hitting the approval gate) this is exact: `terminal` is not in
@@ -136,8 +136,8 @@ class AGUIEventBridge:
     def set_tool_classes(
         self,
         *,
-        frontend_names: Optional[Set[str]] = None,
-        state_writer_names: Optional[Set[str]] = None,
+        frontend_names: Optional[set[str]] = None,
+        state_writer_names: Optional[set[str]] = None,
     ) -> None:
         """Declare which tool names are frontend (client-executed) and which are
         state-writers, so the live ``on_tool_progress`` / ``on_step`` path emits
@@ -149,8 +149,12 @@ class AGUIEventBridge:
     def _is_live_server_tool(self, name: Optional[str]) -> bool:
         """True when *name* is a plain server tool — the only class whose
         TOOL_CALL_* events stream live. Frontend and state-writer tools are
-        handled elsewhere (post-run handoff / state snapshot)."""
-        return bool(name) and name not in self._frontend_names and name not in self._state_writer_names
+        handled elsewhere (relay handoff / state snapshot)."""
+        return (
+            bool(name)
+            and name not in self._frontend_names
+            and name not in self._state_writer_names
+        )
 
     # -- public callback surface (assign these onto the AIAgent) -----------
 
@@ -166,9 +170,15 @@ class AGUIEventBridge:
         self._close_thinking()
         if self._text_message_id is None:
             self._text_message_id = self._id("msg")
-            self._emit(TextMessageStartEvent(message_id=self._text_message_id, role="assistant"))
+            self._emit(
+                TextMessageStartEvent(
+                    message_id=self._text_message_id, role="assistant"
+                )
+            )
         self.emitted_any_text = True
-        self._emit(TextMessageContentEvent(message_id=self._text_message_id, delta=text))
+        self._emit(
+            TextMessageContentEvent(message_id=self._text_message_id, delta=text)
+        )
 
     def on_reasoning_delta(self, text: Optional[str]) -> None:
         """``reasoning_callback``. Provider reasoning/thinking deltas.
@@ -224,6 +234,11 @@ class AGUIEventBridge:
 
         self._emit(ToolCallStartEvent(tool_call_id=tc_id, tool_call_name=name))
         self._emit(ToolCallArgsEvent(tool_call_id=tc_id, delta=json.dumps(args_dict)))
+        # Hermes supplies complete arguments at tool.started. TOOL_CALL_END
+        # closes argument streaming, NOT execution: the result may arrive on
+        # a later HTTP run after native approval. Leaving arguments open makes
+        # the reference client reject RUN_FINISHED{outcome:interrupt}.
+        self._emit(ToolCallEndEvent(tool_call_id=tc_id))
 
     def on_step(self, api_call_count: int, prev_tools: Any = None) -> None:
         """``step_callback``. ``prev_tools`` lists the tools completed in the
@@ -231,7 +246,7 @@ class AGUIEventBridge:
 
         Only server tools that ``on_tool_progress`` emitted a START for have a
         FIFO queue entry, so frontend / state-writer tools appearing here find
-        no queue and are skipped — the END/RESULT gating falls out of that."""
+        no queue and are skipped — the RESULT gating falls out of that."""
         if not isinstance(prev_tools, list):
             return
         for info in prev_tools:
@@ -240,7 +255,6 @@ class AGUIEventBridge:
             if not name or not queue:
                 continue
             tc_id = queue.popleft()
-            self._emit(ToolCallEndEvent(tool_call_id=tc_id))
             self._emit(
                 ToolCallResultEvent(
                     message_id=self._id("res"),
@@ -251,30 +265,29 @@ class AGUIEventBridge:
             if not queue:
                 self._tool_ids.pop(name, None)
 
-    def flush_pending_server_tools(self, results_by_name: Dict[str, Deque[str]]) -> None:
-        """Emit END + RESULT for any live server-tool START still unpaired.
+    def flush_pending_server_tools(
+        self, results_by_name: dict[str, deque[str]]
+    ) -> None:
+        """Emit RESULT for any live server-tool call still unpaired.
 
-        ``on_step`` pairs a completion when the NEXT iteration begins, but a run
-        that unwinds via interrupt right after a tool batch (the mixed
-        server+frontend case: the frontend tool interrupts, so there is no next
-        iteration) never fires that ``step_callback``. This closes those dangling
-        server-tool cards from the post-run message results.
+        Completion normally arrives through ``on_step`` (or the server's
+        tool-complete callback). If that callback did not deliver a result,
+        recover the pending result from the canonical post-run messages.
 
         ``results_by_name`` maps a server-tool name to a FIFO of ALL that name's
         result strings in call order (built by the server from the run's
-        messages). Only the still-open starts are closed here; because a start is
-        removed from its per-name queue as soon as ``on_step`` pairs it, the ``k``
+        messages). Only calls still awaiting results are paired here; because a
+        call is removed from its per-name queue as soon as ``on_step`` pairs it, the ``k``
         pending ids for a name are the LAST ``k`` calls of that name — so we align
         against the TAIL of the results FIFO. Missing entries fall back to an
-        empty result so a card is always closed (never left open on the client)."""
+        empty result. Argument lifecycles were already closed at tool start."""
         for name, queue in list(self._tool_ids.items()):
             all_results = list(results_by_name.get(name) or ())
             # Pending ids correspond to the last len(queue) calls of this name.
-            results = deque(all_results[-len(queue):]) if queue else deque()
+            results = deque(all_results[-len(queue) :]) if queue else deque()
             while queue:
                 tc_id = queue.popleft()
                 result = results.popleft() if results else None
-                self._emit(ToolCallEndEvent(tool_call_id=tc_id))
                 self._emit(
                     ToolCallResultEvent(
                         message_id=self._id("res"),
@@ -293,21 +306,14 @@ class AGUIEventBridge:
         return self._last_tool_call_id
 
     def close_open(self) -> None:
-        """Close EVERY still-open AG-UI lifecycle — streaming text, reasoning,
-        AND any dangling tool-call START — for the error path.
+        """Close text/reasoning and abandon pending results on the error path.
 
-        Unlike :meth:`finish` (which closes only text/reasoning and leaves tool
-        starts open for ``on_step`` / the post-run flush to pair with results),
-        this force-closes open tool calls by emitting a bare ``TOOL_CALL_END``
-        (no result — the run failed, there is none). Used when the run raises
-        mid-stream so a terminal ``RUN_ERROR`` is never preceded by an unclosed
-        START/message the client would render as perpetually streaming."""
+        Tool argument lifecycles already ended at tool.started. Do not emit a
+        second END or invent a result for a tool whose execution failed.
+        """
         self._close_text()
         self._close_thinking()
-        for name in list(self._tool_ids):
-            queue = self._tool_ids.pop(name)
-            while queue:
-                self._emit(ToolCallEndEvent(tool_call_id=queue.popleft()))
+        self._tool_ids.clear()
 
     # -- client-side tool id correlation -----------------------------------
 

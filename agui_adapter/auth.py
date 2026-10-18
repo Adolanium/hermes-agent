@@ -5,6 +5,7 @@ is optional defense-in-depth. Non-loopback bind → fail closed: refuse to start
 without a usable HERMES_AGUI_SESSION_TOKEN. Mirrors the API server
 (gateway/platforms/api_server.py) and dashboard (hermes_cli/web_server.py).
 """
+
 from __future__ import annotations
 
 import hmac
@@ -22,16 +23,25 @@ _SESSION_HEADER_NAME = "X-Hermes-Session-Token"
 def _usable(token: Optional[str]) -> bool:
     try:
         from hermes_cli.auth import has_usable_secret
+
         return bool(token) and has_usable_secret(token, min_length=_MIN_TOKEN_LEN)
     except ImportError:
         logger.warning(
             "hermes_cli.auth.has_usable_secret unavailable; using a reduced "
             "inline length + placeholder-denylist check for the AG-UI bind (the "
-            "full hermes_cli placeholder set was not applied).", )
+            "full hermes_cli placeholder set was not applied).",
+        )
         t = (token or "").strip()
-        _FALLBACK_PLACEHOLDERS = {"changeme", "placeholder", "your_api_key_here",
-                                  "changeme00000000", "placeholder-value", "secret",
-                                  "token", "your_token_here"}
+        _FALLBACK_PLACEHOLDERS = {
+            "changeme",
+            "placeholder",
+            "your_api_key_here",
+            "changeme00000000",
+            "placeholder-value",
+            "secret",
+            "token",
+            "your_token_here",
+        }
         return len(t) >= _MIN_TOKEN_LEN and t.lower() not in _FALLBACK_PLACEHOLDERS
 
 
@@ -47,7 +57,8 @@ def require_token_or_refuse(host: str, token: Optional[str]) -> None:
             "This endpoint can dispatch terminal-capable agent work; an open or "
             "guessable bind is remote code execution. Generate a strong secret "
             "(e.g. `openssl rand -hex 32`).",
-            host, _MIN_TOKEN_LEN,
+            host,
+            _MIN_TOKEN_LEN,
         )
         raise SystemExit(1)
 
@@ -78,7 +89,7 @@ def host_accepted(host_header: str, bound_host: str) -> bool:
         close = h.find("]")
         host_only = h[1:close] if close != -1 else h.strip("[]")
     elif h.count(":") > 1:
-        host_only = h            # bare IPv6 literal, no port
+        host_only = h  # bare IPv6 literal, no port
     else:
         host_only = h.rsplit(":", 1)[0] if ":" in h else h
     host_only = host_only.lower()

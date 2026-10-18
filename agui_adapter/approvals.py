@@ -3,12 +3,13 @@
 A dangerous-command approval blocks the Hermes worker thread inside the
 approval callback. Because AG-UI's native interrupt lifecycle ends the run at
 the interrupt and resumes on a NEW request, the
-blocked worker thread is *parked* (kept alive) in this registry keyed by
-thread_id; the resume run re-attaches and resolves its decision so the command
+blocked worker thread is *parked* (kept alive) in an application-owned registry
+keyed by thread_id; the resume run re-attaches and resolves its decision so the command
 runs inline. State exists ONLY while an approval is blocked. Single process
 only (one uvicorn worker): the parked worker and its asyncio.Queue live on the
 process's single event loop.
 """
+
 from __future__ import annotations
 
 import concurrent.futures
@@ -33,7 +34,7 @@ logger = logging.getLogger(__name__)
 _INTERRUPT_PREEMPTING_ENV = ("HERMES_GATEWAY_SESSION", "HERMES_EXEC_ASK")
 
 
-def neutralize_interrupt_preempting_env() -> "list[str]":
+def neutralize_interrupt_preempting_env() -> list[str]:
     """Clear inherited gateway/ask env flags that would bypass the interrupt.
 
     Returns the names that were set (and have now been cleared) so the caller
@@ -50,6 +51,7 @@ def neutralize_interrupt_preempting_env() -> "list[str]":
     for k in cleared:
         os.environ.pop(k, None)
     return cleared
+
 
 # Pushed onto a run's event queue (as the 2-tuple (PARK, interrupt)) to tell
 # the CURRENT stream to stop draining and leave the worker parked; the stream
@@ -71,12 +73,13 @@ class PendingApproval:
     is fixed at construction; the future itself is resolved to
     once/session/always/deny by whichever of the resume path or the timeout
     wins."""
+
     interrupt_id: str
     command: str
     description: str
     tool_call_id: Optional[str]
     allow_permanent: bool
-    decision: "concurrent.futures.Future"
+    decision: concurrent.futures.Future
 
 
 @dataclass(frozen=True)
@@ -86,32 +89,57 @@ class ParkedRun:
     pending: PendingApproval
 
 
-_lock = threading.Lock()
-_parked: dict[str, ParkedRun] = {}
+class ApprovalRegistry:
+    """Pending decisions owned by one application, never by process globals."""
 
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._parked: dict[str, ParkedRun] = {}
 
-def register(run: ParkedRun) -> bool:
-    with _lock:
-        if run.thread_id in _parked:
-            return False
-        _parked[run.thread_id] = run
-        return True
+    def register(self, run: ParkedRun) -> bool:
+        with self._lock:
+            if run.thread_id in self._parked:
+                return False
+            self._parked[run.thread_id] = run
+            return True
 
+    def take(self, thread_id: str, *, queue=None) -> Optional[ParkedRun]:
+        with self._lock:
+            if (
+                queue is not None
+                and getattr(self._parked.get(thread_id), "queue", None) is not queue
+            ):
+                return None
+            return self._parked.pop(thread_id, None)
 
-def take(thread_id: str) -> Optional[ParkedRun]:
-    with _lock:
-        return _parked.pop(thread_id, None)
+    def take_matching(
+        self, thread_id: str, entries, *, queue=None
+    ) -> Optional[ParkedRun]:
+        """Malformed or foreign replies leave the owning wait live."""
+        with self._lock:
+            parked = self._parked.get(thread_id)
+            if parked is None or (queue is not None and parked.queue is not queue):
+                return None
+            if (
+                len(entries) != 1
+                or entries[0].interrupt_id != parked.pending.interrupt_id
+            ):
+                return None
+            return self._parked.pop(thread_id)
 
+    def peek(self, thread_id: str, *, queue) -> Optional[ParkedRun]:
+        with self._lock:
+            parked = self._parked.get(thread_id)
+            return parked if parked is not None and parked.queue is queue else None
 
-def discard(thread_id: str, expected: Optional[ParkedRun] = None) -> None:
-    with _lock:
-        if expected is None or _parked.get(thread_id) is expected:
-            _parked.pop(thread_id, None)
+    def discard(self, thread_id: str, expected: Optional[ParkedRun] = None) -> None:
+        with self._lock:
+            if expected is None or self._parked.get(thread_id) is expected:
+                self._parked.pop(thread_id, None)
 
-
-def is_parked(thread_id: str) -> bool:
-    with _lock:
-        return thread_id in _parked
+    def is_parked(self, thread_id: str) -> bool:
+        with self._lock:
+            return thread_id in self._parked
 
 
 def resume_to_decision(resume_entries, interrupt_id: str) -> str:
@@ -149,8 +177,16 @@ def expiry_iso(seconds: int) -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + seconds))
 
 
-def make_approval_callback(*, thread_id: str, emit, queue,
-                           last_tool_call_id, new_id, timeout: float):
+def make_approval_callback(
+    *,
+    registry: ApprovalRegistry,
+    thread_id: str,
+    emit,
+    queue,
+    last_tool_call_id,
+    new_id,
+    timeout: float,
+):
     """Build the Hermes approval callback for one AG-UI run.
 
     On a dangerous command it emits a (PARK, interrupt) marker so the DRAINING
@@ -161,15 +197,24 @@ def make_approval_callback(*, thread_id: str, emit, queue,
     """
     from ag_ui.core import Interrupt
 
-    def _cb(command: str, description: str, *, allow_permanent: bool = True, **_) -> str:
+    def _cb(
+        command: str, description: str, *, allow_permanent: bool = True, **_
+    ) -> str:
         interrupt_id = new_id("int")
-        decision: "concurrent.futures.Future" = concurrent.futures.Future()
+        decision: concurrent.futures.Future = concurrent.futures.Future()
         run = ParkedRun(
-            thread_id=thread_id, queue=queue,
-            pending=PendingApproval(interrupt_id, command, description,
-                                    last_tool_call_id(), allow_permanent, decision),
+            thread_id=thread_id,
+            queue=queue,
+            pending=PendingApproval(
+                interrupt_id,
+                command,
+                description,
+                last_tool_call_id(),
+                allow_permanent,
+                decision,
+            ),
         )
-        if not register(run):
+        if not registry.register(run):
             logger.warning(
                 "AG-UI: approval already pending for thread %s; denying concurrent request",
                 thread_id,
@@ -192,15 +237,20 @@ def make_approval_callback(*, thread_id: str, emit, queue,
         # credential can reach this log regardless of caller OR config.
         try:
             from agent.redact import redact_sensitive_text
+
             _cmd_preview = redact_sensitive_text(command, force=True)[:80]
-        except Exception:  # noqa: BLE001 - never let logging break the gate
+        except Exception:
+            logger.exception("AG-UI command redaction failed; suppressing preview")
             _cmd_preview = "<redaction unavailable>"
-        logger.info("AG-UI dangerous command awaiting approval (thread=%s): %s",
-                    thread_id, _cmd_preview)
+        logger.info(
+            "AG-UI dangerous command awaiting approval (thread=%s): %s",
+            thread_id,
+            _cmd_preview,
+        )
         emit((PARK, interrupt))
         try:
             return decision.result(timeout=timeout)
-        except Exception:
+        except (TimeoutError, concurrent.futures.CancelledError):
             # Timeout or error: claim the future for "deny" so a racing resume that
             # then calls set_result() gets InvalidStateError and reports cleanly.
             claimed_deny = False
@@ -208,9 +258,9 @@ def make_approval_callback(*, thread_id: str, emit, queue,
                 try:
                     decision.set_result("deny")
                     claimed_deny = True
-                except Exception:
+                except concurrent.futures.InvalidStateError:
                     pass
-            discard(thread_id, expected=run)
+            registry.discard(thread_id, expected=run)
             if claimed_deny:
                 # We won the race: nobody resumed within the timeout -> deny.
                 logger.info("AG-UI approval timed out; denying (thread=%s)", thread_id)
@@ -218,7 +268,7 @@ def make_approval_callback(*, thread_id: str, emit, queue,
                 # Honor whoever set the future first: a resume-approval may
                 # have landed microseconds before the timeout fired.
                 return decision.result()
-            except Exception:
+            except concurrent.futures.CancelledError:
                 return "deny"
 
     return _cb
