@@ -5,6 +5,7 @@ docs of config.yaml.
 """
 
 from hermes_cli.config_defaults_env import _base_url, _env, _msg, _prov, _setting, _skill, _tool
+from hermes_cli.config_defaults_agui import agui_defaults, agui_token_metadata
 
 #: Image every container terminal backend (docker/modal/daytona/singularity) uses unless the
 #: user pins one. LEGACY_SANDBOX_IMAGES are the plain defaults that preceded the desktop stack
@@ -57,20 +58,7 @@ DEFAULT_CONFIG = {
     # least-recently-active DETACHED sessions (no live client); reopening re-resumes from disk.
     # 0/null disables.
     "max_live_sessions": 16,
-    # Standalone AG-UI HTTP/SSE adapter. Credentials remain in .env; blank
-    # model/provider overrides use the normal Hermes runtime resolver.
-    "agui": {
-        "host": "127.0.0.1",
-        "port": 8000,
-        "toolsets": ["hermes-acp"],
-        "provider": "",
-        "model": "",
-        "api_mode": "",
-        "base_url": "",
-        "frontend_tool_timeout": 60,  # seconds to wait for a browser tool result
-        "max_conversations": 16,  # active + idle agents; refuse excess admission
-        "conversation_idle_timeout": 1800,  # seconds before closing an idle agent
-    },
+    "agui": agui_defaults(),
     "session": {
         # Per-terminal `hermes -c`: each CLI session writes a breadcrumb under
         # $HERMES_HOME/terminal-sessions/<terminal-id>, so bare -c/--continue resumes THIS
@@ -2747,16 +2735,11 @@ DEFAULT_CONFIG = {
     "_config_version": 51,  # Config schema version - bump this when adding new required fields
 }
 
-
 # Optional environment variables that enhance functionality. Feeds the dashboard keys page and setup
 # checklists; category: provider|tool|skill|messaging|setting, advanced=True hides from checklists,
 # tools=[...] lists the model tools the key unlocks.
 OPTIONAL_ENV_VARS = {
-    "HERMES_AGUI_SESSION_TOKEN": _setting(
-        "Session token required for a non-loopback `hermes agui` listener. "
-        "Generate with `openssl rand -hex 32`.",
-        "AG-UI session token (for a networked bind)", None,
-        password=True, advanced=True),
+    "HERMES_AGUI_SESSION_TOKEN": agui_token_metadata(),
     # ── Provider (handled in provider selection, not shown in checklists) ──
     "NOUS_BASE_URL": _base_url("Nous Portal"),
     "HERMES_ANON_API_SECRET": _env(

@@ -350,6 +350,24 @@ def _approval_timeout() -> float:
         return 60.0
 
 
+def _take_matching_approval(registry, relay, run_input):
+    parked = None
+    if relay is not None:
+        with relay.lock:
+            if (
+                run_input.run_id in relay.run_ids
+                or run_input.run_id in relay.conversation.run_ids
+            ):
+                raise ContinuationError("Continuation requires a new run id.")
+            parked = registry.approvals.take_matching(
+                run_input.thread_id, run_input.resume, queue=relay.queue
+            )
+            if parked is not None:
+                relay.run_ids.add(run_input.run_id)
+                relay.conversation.run_ids.add(run_input.run_id)
+    return parked
+
+
 async def _event_stream(
     run_input: RunAgentInput,
     encoder: EventEncoder,
@@ -395,20 +413,7 @@ async def _event_stream(
         )
         relay = registry.get(run_input.thread_id)
         try:
-            parked = None
-            if relay is not None:
-                with relay.lock:
-                    if (
-                        run_input.run_id in relay.run_ids
-                        or run_input.run_id in relay.conversation.run_ids
-                    ):
-                        raise ContinuationError("Continuation requires a new run id.")
-                    parked = registry.approvals.take_matching(
-                        run_input.thread_id, run_input.resume, queue=relay.queue
-                    )
-                    if parked is not None:
-                        relay.run_ids.add(run_input.run_id)
-                        relay.conversation.run_ids.add(run_input.run_id)
+            parked = _take_matching_approval(registry, relay, run_input)
         except ContinuationError as exc:
             yield encoder.encode(RunErrorEvent(message=str(exc)))
             return
