@@ -9,7 +9,7 @@ import threading
 import time
 import uuid
 
-from agui_adapter.translate import parse_state_writer_props
+from agui_adapter.translate import json_contract, parse_state_writer_props
 
 
 def positive_seconds(config, key, default):
@@ -61,16 +61,23 @@ class Conversation:
             raise ValueError("An execution is already active on this thread.")
         if incoming.run_id in self.run_ids:
             raise ValueError("This run id was already accepted.")
-        if incoming.tools != self.tools or tuple(toolsets) != self.toolsets:
+        if (
+            json_contract(incoming.tools) != json_contract(self.tools)
+            or tuple(toolsets) != self.toolsets
+        ):
             raise ValueError(
                 "Tool declarations cannot change within a live conversation."
             )
-        if parse_state_writer_props(incoming.forwarded_props) != self.writers:
+        if json_contract(
+            parse_state_writer_props(incoming.forwarded_props)
+        ) != json_contract(self.writers):
             raise ValueError(
                 "State-writer declarations cannot change within a live conversation."
             )
         if users:
-            if incoming.messages[-1].role != "user" or users[:-1] != self.users:
+            if incoming.messages[-1].role != "user" or json_contract(
+                users[:-1]
+            ) != json_contract(self.users):
                 raise ValueError("The accepted user history cannot be replaced.")
             if users[-1].id in {user.id for user in self.users}:
                 raise ValueError("This user message was already accepted.")

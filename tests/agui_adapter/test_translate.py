@@ -4,7 +4,6 @@ import pytest
 
 from ag_ui.core import (
     AssistantMessage,
-    Context,
     FunctionCall,
     SystemMessage,
     Tool,
@@ -17,7 +16,6 @@ from agui_adapter.session import RunState, StateWriterSpec
 from agui_adapter.translate import (
     agui_messages_to_hermes,
     agui_tools_to_openai,
-    context_to_text,
     forwarded_props_to_text,
     frontend_tool_names,
     parse_state_writer_props,
@@ -60,6 +58,9 @@ def test_message_roundtrip_shapes():
         "function": {"name": "change_background", "arguments": '{"background":"red"}'},
     }
     assert hermes[2] == {"role": "tool", "tool_call_id": "tc1", "content": "ok"}
+    msgs[-1].content = ""
+    msgs[-1].error = "Browser failed to apply action"
+    assert msgs[-1].error in agui_messages_to_hermes(msgs)[2]["content"]
 
 
 def test_prepare_run_fresh_turn():
@@ -97,15 +98,15 @@ def test_prepare_run_requires_a_new_user_turn(tail):
         prepare_run(msgs)
 
 
-def test_context_injected_as_leading_system_not_in_user():
-    msgs = [_user("who am i")]
-    ctx = context_to_text([Context(description="display name", value="Ada")])
-    prep = prepare_run(msgs, context_text=ctx)
-    # Context lands as a system message in history, user message is untouched
-    # (critical for aimock user-message fixture matching).
-    assert prep.user_message == "who am i"
-    assert prep.conversation_history[0]["role"] == "system"
-    assert "Ada" in prep.conversation_history[0]["content"]
+def test_prepare_run_preserves_only_supplied_history():
+    msgs = [
+        _user("first"),
+        AssistantMessage(id="a1", role="assistant", content="reply"),
+        _user("next", "u2"),
+    ]
+    prep = prepare_run(msgs)
+    assert prep.user_message == "next"
+    assert prep.conversation_history == agui_messages_to_hermes(msgs[:-1])
 
 
 def test_tools_conversion_and_names():
@@ -127,6 +128,36 @@ def test_tools_conversion_and_names():
         == "string"
     )
     assert frontend_tool_names(tools) == {"change_background"}
+
+
+@pytest.mark.parametrize(
+    "parameters", [None, {}, {"properties": {"x": False}}, {"type": "object"}]
+)
+def test_tool_parameter_object_contract_is_preserved(parameters):
+    tool = Tool(name="x", description="x", parameters=parameters)
+    _, writer_schemas = parse_state_writer_props(
+        {"stateWriterTools": {"x": {"parameters": parameters}}}
+    )
+    expected = (
+        {"type": "object", "properties": {}} if parameters is None else parameters
+    )
+    for schema in [*agui_tools_to_openai([tool]), *writer_schemas]:
+        assert schema["function"]["parameters"] == expected
+
+
+@pytest.mark.parametrize("parameters", [False, True, 0, [], ["x"], "schema"])
+@pytest.mark.parametrize("writer", [False, True])
+def test_tool_parameter_unsupported_shapes_are_rejected(parameters, writer):
+    for shape in (parameters, {"type": parameters}, {"type": "array"}):
+        with pytest.raises(ValueError, match="parameters.*object"):
+            if writer:
+                parse_state_writer_props(
+                    {"stateWriterTools": {"x": {"parameters": shape}}}
+                )
+            else:
+                agui_tools_to_openai(
+                    [Tool(name="x", description="x", parameters=shape)]
+                )
 
 
 def test_multimodal_user_content_extracts_text():
@@ -160,17 +191,6 @@ def test_forwarded_props_empty_is_blank():
     assert forwarded_props_to_text(None) == ""
 
 
-def test_forwarded_props_injected_as_system_not_in_user():
-    msgs = [_user("hi")]
-    props = forwarded_props_to_text({"tone": "formal"})
-    prep = prepare_run(msgs, system_texts=[props])
-    assert prep.user_message == "hi"
-    sys_contents = [
-        m["content"] for m in prep.conversation_history if m["role"] == "system"
-    ]
-    assert any("tone: formal" in c for c in sys_contents)
-
-
 # --- feature 2: inbound state -> injected context --------------------------
 
 
@@ -183,16 +203,6 @@ def test_state_to_text_renders_json():
 def test_state_to_text_empty_is_blank():
     assert state_to_text({}) == ""
     assert state_to_text(None) == ""
-
-
-def test_state_injected_as_system_not_in_user():
-    msgs = [_user("what am i cooking")]
-    prep = prepare_run(msgs, system_texts=[state_to_text({"recipe": "Pie"})])
-    assert prep.user_message == "what am i cooking"
-    sys_contents = [
-        m["content"] for m in prep.conversation_history if m["role"] == "system"
-    ]
-    assert any("Current shared state" in c and "Pie" in c for c in sys_contents)
 
 
 # --- feature 4: state-writer tool declaration + run-scoped state store ------
@@ -219,6 +229,9 @@ def test_parse_state_writer_props_list_form():
     assert specs["set_notes"].state_key == "notes"
     assert specs["set_notes"].arg == "notes"
     assert specs["set_notes"].mode == "replace"
+    assert RunState(specs=specs).apply("set_notes", {"notes": ["a"]}) == {
+        "notes": ["a"]
+    }
     assert schemas[0]["function"]["name"] == "set_notes"
     assert (
         schemas[0]["function"]["parameters"]["properties"]["notes"]["type"] == "array"
@@ -286,11 +299,9 @@ def test_run_state_append_mode_accumulates_list():
 
 
 def test_run_state_no_arg_merges_args_dict_into_key():
-    rs = RunState(
-        specs={"write_doc": StateWriterSpec(state_key="document", arg="document")}
-    )
-    snap = rs.apply("write_doc", {"document": "hello world"})
-    assert snap["document"] == "hello world"
+    rs = RunState(specs={"write_doc": StateWriterSpec(state_key="document")})
+    snap = rs.apply("write_doc", {"title": "Draft", "body": "Hello"})
+    assert snap["document"] == {"title": "Draft", "body": "Hello"}
 
 
 # --- feature 3: multimodal image passthrough -------------------------------

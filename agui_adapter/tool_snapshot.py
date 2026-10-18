@@ -17,13 +17,15 @@ def pin_tool_snapshot(agent):
     a global patch or a new AIAgent protocol. The real prompt builder still
     runs, including compression's normal cache invalidation/reconstruction.
     """
+    from agui_adapter.translate import json_contract as json_key
+
     tools = copy.deepcopy(agent.tools)
     names = set(agent.valid_tool_names)
     build_prompt = agent._build_system_prompt
 
     @wraps(build_prompt)
     def build_with_admitted_tools(*args, **kwargs):
-        if agent.tools != tools or agent.valid_tool_names != names:
+        if json_key(agent.tools) != json_key(tools) or agent.valid_tool_names != names:
             agent.tools = copy.deepcopy(tools)
             agent.valid_tool_names = set(names)
             # The registry refresh may have persisted its intermediate snapshot.

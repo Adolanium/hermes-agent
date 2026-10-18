@@ -53,7 +53,8 @@ def test_setup_parser_accepts_explicit_agui_section():
 
 
 @pytest.mark.platforms("posix")
-def test_headless_module_serves_health_and_enforces_token():
+@pytest.mark.parametrize("web_concurrency", [None, "2", "bad"])
+def test_headless_module_serves_health_and_enforces_token(web_concurrency):
     import httpx
     from tests.waiting import wait_until
 
@@ -61,6 +62,10 @@ def test_headless_module_serves_health_and_enforces_token():
         listener.bind(("127.0.0.1", 0))
         port = listener.getsockname()[1]
     token = "r4N7g2V9q5H1c8L6p3S0u9F2d4K7m1W5"
+    env = os.environ.copy()
+    env.pop("WEB_CONCURRENCY", None)
+    if web_concurrency is not None:
+        env["WEB_CONCURRENCY"] = web_concurrency
     with subprocess.Popen(
         [
             sys.executable,
@@ -77,6 +82,7 @@ def test_headless_module_serves_health_and_enforces_token():
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         cwd=Path(__file__).resolve().parents[2],
+        env=env,
         text=True,
     ) as process:
         try:

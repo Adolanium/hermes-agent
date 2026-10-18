@@ -5,6 +5,7 @@ import json
 import shlex
 
 from fastapi.testclient import TestClient
+import pytest
 
 from agui_adapter.server import create_app
 from hermes_cli.config import save_config
@@ -12,7 +13,11 @@ from tests.agui_adapter.test_modernization_probe import body, config_for, events
 from tests.agui_adapter.test_conversations import next_user
 
 
-def test_independent_apps_can_park_the_same_thread_id(peer, tmp_path):
+@pytest.mark.parametrize(
+    "approved,status",
+    [(False, "resolved"), (1, "resolved"), ("true", "resolved"), (True, "cancelled")],
+)
+def test_independent_apps_can_park_the_same_thread_id(peer, tmp_path, approved, status):
     target = tmp_path / "must-not-be-removed"
     target.mkdir()
     peer.tool_name = "terminal"
@@ -53,8 +58,8 @@ def test_independent_apps_can_park_the_same_thread_id(peer, tmp_path):
                         "interruptId": interrupted[-1]["outcome"]["interrupts"][0][
                             "id"
                         ],
-                        "status": "resolved",
-                        "payload": {"approved": False},
+                        "status": status,
+                        "payload": {"approved": approved, "scope": [1]},
                     }
                 ]
                 assert (
@@ -65,7 +70,12 @@ def test_independent_apps_can_park_the_same_thread_id(peer, tmp_path):
     assert len(peer.requests) == 4
 
 
-def test_session_approval_is_not_shared_by_apps_or_reused_thread_ids(peer, tmp_path):
+@pytest.mark.parametrize(
+    "scope", [None, [], [1], {}, {"x": 1}, "unknown", "once", "session"]
+)
+def test_session_approval_is_not_shared_by_apps_or_reused_thread_ids(
+    peer, tmp_path, scope
+):
     from tools import approval
 
     target = tmp_path / "owned-session-probe"
@@ -94,7 +104,7 @@ def test_session_approval_is_not_shared_by_apps_or_reused_thread_ids(peer, tmp_p
                 {
                     "interruptId": first[-1]["outcome"]["interrupts"][0]["id"],
                     "status": "resolved",
-                    "payload": {"approved": True, "scope": "session"},
+                    "payload": {"approved": True, "scope": scope},
                 }
             ]
             events(one.post("/", json=resumed))
@@ -106,7 +116,7 @@ def test_session_approval_is_not_shared_by_apps_or_reused_thread_ids(peer, tmp_p
                     "session approval leaked across apps"
                 )
                 assert target.exists()
-            # A fresh user turn in the owning live conversation keeps its grant.
+            # Only a session scope keeps its grant on the next user turn.
             peer.script = lambda incoming, index: (
                 {
                     "role": "assistant",
@@ -126,8 +136,10 @@ def test_session_approval_is_not_shared_by_apps_or_reused_thread_ids(peer, tmp_p
                 else {"role": "assistant", "content": "SESSION_DONE"}
             )
             warmed = events(one.post("/", json=next_user(request)))
-            assert warmed[-1]["outcome"]["type"] == "success"
-            assert not target.exists()
+            assert warmed[-1]["outcome"]["type"] == (
+                "success" if scope == "session" else "interrupt"
+            )
+            assert target.exists() is (scope != "session")
         assert first_record is not None
         assert first_record.approval_key not in approval._session_approved
     finally:

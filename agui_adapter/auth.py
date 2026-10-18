@@ -9,7 +9,9 @@ without a usable HERMES_AGUI_SESSION_TOKEN. Mirrors the API server
 from __future__ import annotations
 
 import hmac
+import ipaddress
 import logging
+import re
 from typing import Optional
 
 from gateway.platforms.base import is_network_accessible
@@ -75,27 +77,47 @@ def token_valid(request, token: str) -> bool:
 def host_accepted(host_header: str, bound_host: str) -> bool:
     """DNS-rebinding guard: True if the Host header targets the bound interface.
 
-    Loopback bind accepts loopback names; an explicit 0.0.0.0/:: bind accepts
-    anything (operator opted into all interfaces); otherwise require an exact
-    host match. Based on hermes_cli/web_server.py::_is_accepted_host, with an
-    added branch for bare (unbracketed) IPv6 literals like ``::1`` that the
-    sibling mangles.
+    Accept complete hostname/IP authorities, including supported bare IPv6.
+    Loopback aliases share the startup guard's effective loopback policy;
+    wildcard binds still require valid authority syntax before accepting it.
     """
-    loopback = {"localhost", "127.0.0.1", "::1"}
-    if not host_header:
+    match = re.fullmatch(
+        r"(?:\[([0-9a-fA-F:.]+)\]|([a-zA-Z0-9_.-]+))(?::([0-9]+))?"
+        r"|([0-9a-fA-F:.]*:[0-9a-fA-F:.]+)",
+        host_header,
+    )
+    if not match:
         return False
-    h = host_header.strip()
-    if h.startswith("["):
-        close = h.find("]")
-        host_only = h[1:close] if close != -1 else h.strip("[]")
-    elif h.count(":") > 1:
-        host_only = h  # bare IPv6 literal, no port
-    else:
-        host_only = h.rsplit(":", 1)[0] if ":" in h else h
-    host_only = host_only.lower()
-    if bound_host in {"0.0.0.0", "::"}:
+    host_only = match[1] or match[2] or match[4]
+    if match[3] is not None:
+        port = match[3].lstrip("0") or "0"
+        if len(port) > 5 or int(port) > 65535:
+            return False
+    try:
+        address = ipaddress.ip_address(host_only)
+    except ValueError:
+        if match[1] or match[4]:  # Bracketed and bare IPv6 must be IP literals.
+            return False
+        address = None
+    if match[1] and address.version != 6:
+        return False
+    try:
+        bound = ipaddress.ip_address(bound_host)
+    except ValueError:
+        bound = None
+    # IPv4-mapped loopback has the same OS boundary as its IPv4 address.
+    effective_address = getattr(address, "ipv4_mapped", None) or address
+    effective_bound = getattr(bound, "ipv4_mapped", None) or bound
+    if bound and bound.is_unspecified:
         return True
-    b = bound_host.lower()
-    if b in loopback:
-        return host_only in loopback
-    return host_only == b
+    if bound_host.lower() == "localhost" or (
+        effective_bound and effective_bound.is_loopback
+    ):
+        return host_only.lower() == "localhost" or bool(
+            effective_address and effective_address.is_loopback
+        )
+    return (
+        address == bound
+        if address and bound
+        else host_only.lower() == bound_host.lower()
+    )

@@ -9,19 +9,28 @@ Three directions matter for a run:
   agent's advertised tool list. These are the *frontend* (client-executed)
   tools; their names are added to ``agent.valid_tool_names`` (see
   ``session._merge_frontend_tools``).
-* ``RunAgentInput.context[]`` -> a read-only system message injected into the
-  history so the model can consult it.
-
-Design note — determinism with aimock: frontend context is injected as a
-*separate system message*, never merged into the user message. aimock matches
-fixtures on the user message text, so mutating it would break fixture lookup.
+* Frontend data -> the new user turn, supplied by the server while preserving
+  the cached Hermes system prompt and canonical conversation history.
 """
 
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
-from typing import Any, List, Optional
+from dataclasses import asdict, dataclass, is_dataclass
+from typing import Any, List
+
+
+def json_contract(value):
+    """Compare frozen JSON data without conflating booleans and numbers."""
+    return json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=lambda item: (
+            asdict(item) if is_dataclass(item) else item.model_dump(mode="json")
+        ),
+    )
+
 
 # AG-UI content-block text extraction ---------------------------------------
 
@@ -131,13 +140,21 @@ def _assistant_message(message: Any) -> dict:
     return result
 
 
+def tool_result_content(message):
+    """Keep frontend failures visible in the existing tool-result content."""
+    error = getattr(message, "error", None)
+    if error:
+        return f"{message.content}\nFrontend tool error: {error}"
+    return message.content
+
+
 _MESSAGE_HANDLERS = {
     "user": lambda m: {"role": "user", "content": _content_to_parts(m.content)},
     "assistant": _assistant_message,
     "tool": lambda m: {
         "role": "tool",
         "tool_call_id": m.tool_call_id,
-        "content": m.content,
+        "content": tool_result_content(m),
     },
     "system": lambda m: {"role": "system", "content": m.content},
     "developer": lambda m: {"role": "system", "content": m.content},
@@ -164,9 +181,6 @@ class PreparedRun:
 
 def prepare_run(
     messages: list[Any],
-    *,
-    context_text: str = "",
-    system_texts: Optional[list[str]] = None,
 ) -> PreparedRun:
     """Split AG-UI messages into (user_message, conversation_history).
 
@@ -176,17 +190,6 @@ def prepare_run(
     if not messages or getattr(messages[-1], "role", None) != "user":
         raise ValueError("Turn preparation requires a new user turn.")
     hermes = agui_messages_to_hermes(messages)
-    # Leading read-only system messages: frontend context, then any extra
-    # injected system texts (forwarded props, inbound shared state). Each is a
-    # separate system message, never merged into the user turn — so aimock
-    # user-message fixture matching stays deterministic.
-    leading = [
-        {"role": "system", "content": t}
-        for t in ([context_text] + list(system_texts or []))
-        if t
-    ]
-    if leading:
-        hermes = leading + hermes
 
     return PreparedRun(
         user_message=_content_to_parts(messages[-1].content),
@@ -197,17 +200,30 @@ def prepare_run(
 # Tools ---------------------------------------------------------------------
 
 
+def _object_parameters(parameters: Any) -> dict:
+    """Validate the supported top-level tool schema without changing its meaning."""
+    if parameters is None:
+        return {"type": "object", "properties": {}}
+    if not isinstance(parameters, dict) or parameters.get("type", "object") != "object":
+        raise ValueError("Tool parameters must be an object schema.")
+    return parameters
+
+
 def agui_tools_to_openai(tools: list[Any]) -> list[dict]:
     """Convert AG-UI ``Tool`` entries to OpenAI function-tool schemas."""
     schemas: list[dict] = []
+    seen = set()
     for t in tools or []:
+        if t.name in seen:
+            raise ValueError("Frontend tool names must be unique.")
+        seen.add(t.name)
         schemas.append(
             {
                 "type": "function",
                 "function": {
                     "name": t.name,
                     "description": t.description or "",
-                    "parameters": t.parameters or {"type": "object", "properties": {}},
+                    "parameters": _object_parameters(t.parameters),
                 },
             }
         )
@@ -304,18 +320,32 @@ def parse_state_writer_props(props: Any) -> tuple[dict, list[dict]]:
     decls: list[dict] = []
     if isinstance(raw, dict):
         for name, decl in raw.items():
-            entry = dict(decl) if isinstance(decl, dict) else {}
+            if not isinstance(decl, dict):
+                raise ValueError("State-writer declarations must be objects.")
+            entry = dict(decl)
             entry.setdefault("name", name)
             decls.append(entry)
     elif isinstance(raw, list):
-        decls = [d for d in raw if isinstance(d, dict)]
+        decls = raw
+    else:
+        raise ValueError("State-writer declarations must be a list or mapping.")
 
     specs: dict = {}
     schemas: list[dict] = []
     for decl in decls:
+        if not isinstance(decl, dict):
+            raise ValueError("State-writer declarations must be objects.")
         name = decl.get("name")
-        if not name:
-            continue
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("State-writer name must be a nonempty string.")
+        if name in specs:
+            raise ValueError("State-writer names must be unique.")
+        for key in ("stateKey", "state_key"):
+            if key in decl and not isinstance(decl[key], str):
+                raise ValueError("State-writer state key must be a string.")
+        for key in ("arg", "description"):
+            if decl.get(key) is not None and not isinstance(decl[key], str):
+                raise ValueError(f"State-writer {key} must be a string.")
         specs[name] = StateWriterSpec(
             state_key=decl.get("stateKey") or decl.get("state_key") or "",
             arg=decl.get("arg"),
@@ -331,8 +361,7 @@ def parse_state_writer_props(props: Any) -> tuple[dict, list[dict]]:
                 "function": {
                     "name": name,
                     "description": decl.get("description") or "Update shared UI state.",
-                    "parameters": decl.get("parameters")
-                    or {"type": "object", "properties": {}},
+                    "parameters": _object_parameters(decl.get("parameters")),
                 },
             }
         )

@@ -121,7 +121,7 @@ agui:
   # Optional model overrides — leave blank to defer to your `hermes model` config:
   provider: ""             # e.g. "custom" for an OpenAI-compatible endpoint
   model: ""                # e.g. "gpt-4o"
-  api_mode: ""             # "chat_completions" or "responses"
+  api_mode: ""             # "chat_completions" or "codex_responses"
   base_url: ""             # set to bypass the resolver and call this endpoint directly
   frontend_tool_timeout: 60       # seconds to wait for a browser tool result
   max_conversations: 16           # active + idle agents; reject excess admission
@@ -240,14 +240,16 @@ script. It does **not** fire for:
   agent can overwrite `.env`/SSH keys without an approval). This is a **known
   gap**: Hermes core exposes no file-edit approval hook this adapter can call, so
   gating it here would require a Hermes-core change — out of scope for this
-  adapter. To gate file edits, **drop `write_file`/`patch` from
-  `agui.toolsets`** (in `config.yaml`), or run on an isolated `env_type`.
+  adapter. To omit dedicated file-edit tools, configure `config.yaml`:
 
-To make the interrupt cover **all** local code execution: run the default
-(`manual`) `approvals.mode` on a non-isolated `env_type`, and set
-`agui.toolsets` to a toolset that **excludes `execute_code`, `delegate_task`,
-`write_file`, and `patch`**. Those are kept in the default toolset for
-capability parity; excluding them is the operator's hardening lever.
+```yaml
+agui:
+  toolsets: [terminal]
+```
+
+This retains `terminal` and process management while excluding `write_file`,
+`patch`, `execute_code`, and `delegate_task`. Shell commands can still modify
+files; the existing dangerous-command guards described above apply.
 </details>
 
 **Reverse proxy / embedding notes.** The Host guard rejects any `Host` that
@@ -340,6 +342,8 @@ per run:
    `{name, stateKey, arg?, mode?, description?, parameters?}`. `arg` picks which
    tool argument carries the value (omit → merge the whole args dict); `mode` is
    `"replace"` (default) or `"append"`.
+   Frontend `tools[]` and `stateWriterTools` declarations must each have unique
+   names, including explicit names in the state-writer mapping form.
 3. **Write** — each declared tool gets a server-side handler that merges the
    call's args into the `RunState` and returns a confirmation (it does *not*
    interrupt), so the model reads the result and continues.

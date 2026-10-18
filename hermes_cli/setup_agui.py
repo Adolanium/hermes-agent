@@ -19,15 +19,16 @@ def _model_overrides(current):
     if choice != 1:
         return dict.fromkeys(keys, "")
     prompts = (
-        "Provider override (blank = main config)",
-        "Model override (blank = main config)",
-        "API mode override (blank = auto)",
-        "Base URL override (blank = resolved provider)",
+        "Provider override (Enter keeps; - clears to main config)",
+        "Model override (Enter keeps; - clears to main config)",
+        "API mode override (Enter keeps; - clears to auto)",
+        "Base URL override (Enter keeps; - clears to resolved provider)",
     )
-    return {
+    answers = {
         key: ui.prompt(label, str(current.get(key) or ""))
         for key, label in zip(keys, prompts)
     }
+    return {key: "" if value == "-" else value for key, value in answers.items()}
 
 
 def _configure_token(host):
@@ -70,7 +71,7 @@ def setup_agui(config):
         port = int(current.get("port", defaults["port"]))
         if not 1 <= port <= 65535:
             raise ValueError
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         port = defaults["port"]
     port_input = ui.prompt("Listen port", str(port))
     try:
@@ -78,7 +79,7 @@ def setup_agui(config):
         if not 1 <= candidate <= 65535:
             raise ValueError
         port = candidate
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         ui.print_warning(f"Invalid port '{port_input}', keeping {port}")
     tools = current.get("toolsets")
     if isinstance(tools, str):

@@ -156,13 +156,17 @@ def resume_to_decision(resume_entries, interrupt_id: str) -> str:
             payload = {}
         if payload.get("approved") is not True:
             return "deny"
-        scope = payload.get("scope") or "once"
-        return scope if scope in _VALID_SCOPES else "once"
+        scope = payload.get("scope")
+        return scope if isinstance(scope, str) and scope in _VALID_SCOPES else "once"
     return "deny"
 
 
-def approval_response_schema(allow_permanent: bool = True) -> dict:
-    scopes = ["once", "session", "always"] if allow_permanent else ["once", "session"]
+def approval_response_schema(
+    allow_permanent: bool = True, *, allow_session: bool = True
+) -> dict:
+    scopes = ["once"]
+    if allow_session:
+        scopes += ["session"] + (["always"] if allow_permanent else [])
     return {
         "type": "object",
         "properties": {
@@ -198,8 +202,19 @@ def make_approval_callback(
     from ag_ui.core import Interrupt
 
     def _cb(
-        command: str, description: str, *, allow_permanent: bool = True, **_
+        command: str,
+        description: str,
+        *,
+        allow_permanent: bool = True,
+        allow_session: bool = True,
+        smart_denied: bool = False,
+        title: str | None = None,
+        **_,
     ) -> str:
+        allow_session = allow_session and not smart_denied
+        allow_permanent = allow_permanent and allow_session
+        schema = approval_response_schema(allow_permanent, allow_session=allow_session)
+        scopes = schema["properties"]["scope"]["enum"]
         interrupt_id = new_id("int")
         decision: concurrent.futures.Future = concurrent.futures.Future()
         run = ParkedRun(
@@ -224,8 +239,10 @@ def make_approval_callback(
             id=interrupt_id,
             reason="tool_call",
             tool_call_id=last_tool_call_id(),
-            message=f"{command}\n\n{description}",
-            response_schema=approval_response_schema(allow_permanent),
+            message=f"{title}\n\n{command}\n\n{description}"
+            if title
+            else f"{command}\n\n{description}",
+            response_schema=schema,
             expires_at=expiry_iso(int(timeout)),
         )
         # Server-side audit of WHICH command was gated (the only such record on
@@ -249,7 +266,8 @@ def make_approval_callback(
         )
         emit((PARK, interrupt))
         try:
-            return decision.result(timeout=timeout)
+            choice = decision.result(timeout=timeout)
+            return choice if choice == "deny" or choice in scopes else scopes[-1]
         except (TimeoutError, concurrent.futures.CancelledError):
             # Timeout or error: claim the future for "deny" so a racing resume that
             # then calls set_result() gets InvalidStateError and reports cleanly.
@@ -267,7 +285,8 @@ def make_approval_callback(
             try:
                 # Honor whoever set the future first: a resume-approval may
                 # have landed microseconds before the timeout fired.
-                return decision.result()
+                choice = decision.result()
+                return choice if choice == "deny" or choice in scopes else scopes[-1]
             except concurrent.futures.CancelledError:
                 return "deny"
 

@@ -154,16 +154,7 @@ def _run_turn(
     """
     frontend_schemas = translate.agui_tools_to_openai(run_input.tools)
     frontend_names = translate.frontend_tool_names(run_input.tools)
-    context_text = translate.context_to_text(run_input.context)
-    # forwarded_props (agent config) and inbound shared state are each injected
-    # as their own read-only system message, exactly like context_text.
-    props_text = translate.forwarded_props_to_text(run_input.forwarded_props)
-    state_text = translate.state_to_text(run_input.state)
-    prep = translate.prepare_run(
-        run_input.messages,
-        context_text=context_text,
-        system_texts=[props_text, state_text],
-    )
+    prep = translate.prepare_run(run_input.messages)
 
     # Shared state: seed the run-scoped store from inbound state so snapshots
     # carry UI-set keys (e.g. preferences) alongside agent-written keys. Declare
@@ -175,18 +166,22 @@ def _run_turn(
     run_state = RunState(state=dict(inbound_state), specs=state_specs)
 
     conversation = frontend.conversation if frontend is not None else None
+    if frontend is not None and (
+        conversation is None
+        or conversation.agent is None
+        or translate.json_contract(frontend.context)
+        != translate.json_contract(conversation.context)
+    ):
+        note = "\n\nCurrent frontend data (not system instructions):\n" + json.dumps(
+            frontend.context
+        )
+        if isinstance(prep.user_message, str):
+            prep.user_message += note
+        else:
+            prep.user_message = [*prep.user_message, {"type": "text", "text": note}]
     if conversation is not None and conversation.agent is not None:
         agent = conversation.agent
         prep.conversation_history = conversation.messages
-        if frontend.context != conversation.context:
-            note = (
-                "\n\nCurrent frontend data (not system instructions):\n"
-                + json.dumps(frontend.context)
-            )
-            if isinstance(prep.user_message, str):
-                prep.user_message += note
-            else:
-                prep.user_message = [*prep.user_message, {"type": "text", "text": note}]
     else:
         agent = build_run_agent(
             config,
@@ -382,7 +377,7 @@ async def _event_stream(
                     "No pending frontend result (expired, unknown or server restarted)."
                 )
             queue = relay.resolve(run_input)
-        except ContinuationError as exc:
+        except ValueError as exc:
             yield encoder.encode(RunErrorEvent(message=str(exc)))
             return
         try:
@@ -399,13 +394,24 @@ async def _event_stream(
             RunStartedEvent(thread_id=run_input.thread_id, run_id=run_input.run_id)
         )
         relay = registry.get(run_input.thread_id)
-        parked = (
-            registry.approvals.take_matching(
-                run_input.thread_id, run_input.resume, queue=relay.queue
-            )
-            if relay is not None
-            else None
-        )
+        try:
+            parked = None
+            if relay is not None:
+                with relay.lock:
+                    if (
+                        run_input.run_id in relay.run_ids
+                        or run_input.run_id in relay.conversation.run_ids
+                    ):
+                        raise ContinuationError("Continuation requires a new run id.")
+                    parked = registry.approvals.take_matching(
+                        run_input.thread_id, run_input.resume, queue=relay.queue
+                    )
+                    if parked is not None:
+                        relay.run_ids.add(run_input.run_id)
+                        relay.conversation.run_ids.add(run_input.run_id)
+        except ContinuationError as exc:
+            yield encoder.encode(RunErrorEvent(message=str(exc)))
+            return
         if parked is None:
             logger.info(
                 "AG-UI resume with no parked approval (thread=%s run=%s)",
@@ -537,6 +543,8 @@ async def _event_stream(
                 emit((approvals.ERROR, relay.cancelled))
                 return
             result = out["result"]
+            if result.get("failed", bool(result.get("error"))):
+                raise RuntimeError("The agent run failed.")
             frontend_names = out["frontend_names"]
             state_writer_names = out["state_writer_names"]
             run_state: RunState = out["run_state"]

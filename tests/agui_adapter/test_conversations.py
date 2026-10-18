@@ -49,10 +49,13 @@ def plain_model(peer):
     }
 
 
-def test_two_user_turns_keep_agent_system_prompt_history_and_tools(peer, agents):
+@pytest.mark.parametrize("boolean_change", [False, True])
+def test_two_user_turns_keep_agent_system_prompt_history_and_tools(
+    peer, agents, boolean_change
+):
     plain_model(peer)
     request = frontend_request(peer)
-    request["state"] = {"color": "red"}
+    request["state"] = {"color": "red", "nested": [1]}
     request["context"] = [{"description": "current item", "value": "first-item"}]
     request["forwardedProps"] = {"tone": "brief"}
     with TestClient(
@@ -60,9 +63,16 @@ def test_two_user_turns_keep_agent_system_prompt_history_and_tools(peer, agents)
     ) as client:
         events(client.post("/", json=request))
         followup = next_user(request)
-        followup["state"] = {"color": "blue"}
-        followup["context"] = [{"description": "current item", "value": "second-item"}]
-        followup["forwardedProps"] = {"tone": "detailed"}
+        followup["state"] = (
+            {"nested": [True], "color": "red"}
+            if boolean_change
+            else {"color": "blue", "nested": [1]}
+        )
+        if not boolean_change:
+            followup["context"] = [
+                {"description": "current item", "value": "second-item"}
+            ]
+            followup["forwardedProps"] = {"tone": "detailed"}
         events(client.post("/", json=followup))
         assert len(agents) == 1, "a new user turn rebuilt the conversation agent"
         assert agents[0]._user_turn_count == 2
@@ -70,9 +80,12 @@ def test_two_user_turns_keep_agent_system_prompt_history_and_tools(peer, agents)
     assert after["messages"][: len(before["messages"])] == before["messages"]
     assert after["tools"] == before["tools"]
     assert after["messages"][-1]["role"] == "user"
-    assert "blue" in after["messages"][-1]["content"]
-    assert "second-item" in after["messages"][-1]["content"]
-    assert "detailed" in after["messages"][-1]["content"]
+    assert ('"nested": [true]' if boolean_change else "blue") in after["messages"][-1][
+        "content"
+    ]
+    if not boolean_change:
+        assert "second-item" in after["messages"][-1]["content"]
+        assert "detailed" in after["messages"][-1]["content"]
     assert any(message["content"] == "MODEL_REPLY_0" for message in after["messages"])
     assert not any(
         message["content"] == "Browser projection" for message in after["messages"]
@@ -93,6 +106,7 @@ def test_frontend_result_context_survives_a_later_user_turn(peer, agents):
         assert len(agents) == 1
     previous, following = peer.requests[1:]
     assert following["messages"][: len(previous["messages"])] == previous["messages"]
+    assert following["messages"][-1]["content"] == "Second real user turn"
     tool = next(
         message for message in following["messages"] if message["role"] == "tool"
     )

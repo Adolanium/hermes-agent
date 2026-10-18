@@ -57,25 +57,44 @@ def _setup_logging() -> None:
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
 
+def _listener_value(key, value):
+    if key == "host":
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("agui.host must be a nonempty string.")
+        return value
+    message = "agui.port must be an integer from 0 to 65535."
+    if isinstance(value, str):
+        try:
+            value = int(value)
+        except ValueError:
+            raise ValueError(message) from None
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 65535:
+        raise ValueError(message)
+    return value
+
+
 def _load_listener_config() -> tuple[str, int]:
     """Resolve (host, port) from the ``agui`` section of ``config.yaml``.
 
     Behavioral settings, so they come from config — not the environment. A
     missing/invalid config falls back to the loopback defaults.
     """
-    host, port = "127.0.0.1", 8000
+    listener = {"host": "127.0.0.1", "port": 8000}
     try:
         from hermes_cli.config import load_config
 
         section = load_config().get("agui")
         if isinstance(section, dict):
-            host = str(section.get("host") or host)
-            port = int(section.get("port") or port)
+            for key, default in listener.items():
+                try:
+                    listener[key] = _listener_value(key, section.get(key, default))
+                except ValueError as exc:
+                    logging.getLogger(__name__).warning("%s Using %r.", exc, default)
     except Exception:
         logging.getLogger(__name__).debug(
             "load_config() failed; using listener defaults", exc_info=True
         )
-    return host, port
+    return listener["host"], listener["port"]
 
 
 def main(
@@ -104,8 +123,11 @@ def main(
     from agent.secret_scope import get_secret
 
     cfg_host, cfg_port = _load_listener_config()
-    host = host or cfg_host
-    port = int(port) if port is not None else cfg_port
+    try:
+        host = _listener_value("host", cfg_host if host is None else host)
+        port = _listener_value("port", cfg_port if port is None else port)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
     token = token or get_secret("HERMES_AGUI_SESSION_TOKEN") or None
     # main() is the authoritative fail-closed guard: it passes the SAME host to both
     # require_token_or_refuse and uvicorn.run below, so a network-accessible bind
@@ -120,6 +142,7 @@ def main(
         create_app(session_token=token, bound_host=host),
         host=host,
         port=port,
+        workers=1,
         log_level="warning",
     )
 

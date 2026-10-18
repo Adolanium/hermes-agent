@@ -9,6 +9,8 @@ the adapter's own re-registered names, and missing intra-run duplicates).
 """
 
 import pytest
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 from agui_adapter.session import (
     ToolNameCollisionError,
@@ -167,6 +169,31 @@ class TestGuardIsWiredIntoBuildRunAgent:
     settings or constructs an ``AIAgent``, so these need no model or network.
     """
 
+    @pytest.mark.parametrize("kind", ["frontend", "state_writer"])
+    def test_dispatch_reserved_names_rejected_before_resolution(
+        self, registry, monkeypatch, kind
+    ):
+        from agui_adapter import session
+        from model_tools import _LEGACY_TOOL_ALIASES
+        from tools.tool_search import BRIDGE_TOOL_NAMES
+
+        config = session.AgentConfig()
+        config.enabled_toolsets = []
+        monkeypatch.setattr(
+            session,
+            "_resolve_agent_settings",
+            lambda config: pytest.fail("reserved name reached agent resolution"),
+        )
+        for name in sorted(set(_LEGACY_TOOL_ALIASES) | set(BRIDGE_TOOL_NAMES)):
+            kwargs = (
+                {"frontend_tool_names": {name}}
+                if kind == "frontend"
+                else {"state_writer_specs": {name: session.StateWriterSpec()}}
+            )
+            with pytest.raises(ToolNameCollisionError) as exc:
+                session.build_run_agent(config, **kwargs)
+            assert exc.value.names == [name]
+
     def test_frontend_collision_rejected_by_build_run_agent(self, server_tool_name):
         from agui_adapter.session import AgentConfig, build_run_agent
 
@@ -198,3 +225,61 @@ class TestGuardIsWiredIntoBuildRunAgent:
         entry_after = registry.get_entry(server_tool_name)
         assert entry_after is entry_before
         assert entry_after.toolset not in _ADAPTER_TOOLSETS
+
+
+@pytest.mark.parametrize("kinds", [(True, False), (True, True), (False, False)])
+def test_concurrent_ownership_and_schemas(registry, peer, monkeypatch, kinds):
+    from agui_adapter import session
+    from hermes_cli.config import save_config
+    from tests.agui_adapter.test_modernization_probe import config_for
+
+    name = "agui_concurrent_ownership"
+    barrier = threading.Barrier(2)
+    resolve = session._resolve_agent_settings
+    agents, errors = [], []
+    save_config({"auxiliary": {"title_generation": {"enabled": False}}})
+
+    def sync_resolve(config):
+        barrier.wait(timeout=10)
+        return resolve(config)
+
+    def build(index, frontend):
+        parameters = {"type": "object", "properties": {str(index): {"type": "string"}}}
+        function = dict(name=name, description=str(index), parameters=parameters)
+        schema = {"type": "function", "function": function}
+        if frontend:
+            kwargs = dict(frontend_tool_names={name}, frontend_tool_schemas=[schema])
+        else:
+            kwargs = dict(
+                state_writer_specs={name: session.StateWriterSpec()},
+                state_writer_schemas=[schema],
+            )
+        return session.build_run_agent(config_for(peer, []), **kwargs), schema, frontend
+
+    monkeypatch.setattr(session, "_resolve_agent_settings", sync_resolve)
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [executor.submit(build, i, kind) for i, kind in enumerate(kinds)]
+            for future in futures:
+                try:
+                    agents.append(future.result(timeout=20))
+                except ToolNameCollisionError as error:
+                    errors.append(error)
+        assert len(errors) == (1 if kinds[0] != kinds[1] else 0)
+        for agent, schema, frontend in agents:
+            assert (
+                next(t for t in agent.tools if t["function"]["name"] == name) == schema
+            )
+            expected = _FRONTEND_TOOLSET if frontend else _STATE_WRITER_TOOLSET
+            assert registry.get_entry(name).toolset == expected
+        result = registry.dispatch(name, {"value": "accepted"})
+        if agents[0][2]:
+            assert "Frontend dispatch requires a live frontend relay" in result
+        else:
+            assert result == "State updated."
+    finally:
+        for agent, _, _ in agents:
+            agent.close()
+        registry.deregister(name)
+        session._registered_frontend_names.discard(name)
+        session._registered_state_writer_names.discard(name)

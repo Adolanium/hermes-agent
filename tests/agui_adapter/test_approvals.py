@@ -231,8 +231,6 @@ def test_approval_log_uses_redacted_command(caplog, registry):
     # command (the server-side audit record), never the raw command.
     import logging
 
-    from agent.redact import redact_sensitive_text
-
     cmd = "curl -H 'Authorization: Bearer supersecrettoken123' https://x"
     cb = approvals.make_approval_callback(
         registry=registry,
@@ -246,10 +244,10 @@ def test_approval_log_uses_redacted_command(caplog, registry):
     with caplog.at_level(logging.INFO, logger="agui_adapter.approvals"):
         assert cb(cmd, "danger") == "deny"  # logs, parks, times out -> deny
     logged = " ".join(r.getMessage() for r in caplog.records)
-    expected = redact_sensitive_text(cmd, force=True)[:80]
-    assert expected in logged  # the log used the force-redacted+truncated form
-    if expected != cmd[:80]:  # if redaction scrubbed it, the raw secret is gone
-        assert "supersecrettoken123" not in logged
+    assert "supersecrettoken123" not in logged
+    assert "awaiting approval" in logged
+    assert "curl" in logged
+    assert "..." in logged
 
 
 def test_callback_timeout_returns_deny(registry):
@@ -360,3 +358,72 @@ def test_dangerous_command_reaches_interactive_callback_not_gateway_fallback(
     # callback and returns status 'pending_approval').
     assert result.get("status") != "pending_approval"
     assert result.get("approved") is False  # our callback denied
+
+
+@pytest.mark.parametrize(
+    "flags,scopes",
+    [
+        ({}, ["once", "session", "always"]),
+        ({"allow_permanent": False}, ["once", "session"]),
+        ({"allow_session": False}, ["once"]),
+        ({"smart_denied": True}, ["once"]),
+        ({"allow_permanent": False, "smart_denied": True}, ["once"]),
+    ],
+)
+@pytest.mark.parametrize("choice", ["once", "session", "always", "deny"])
+@pytest.mark.parametrize("timeout_race", [False, True])
+def test_prompt_scopes_bound_offered_and_returned_approval(
+    registry, monkeypatch, flags, scopes, choice, timeout_race
+):
+    from ag_ui.core import ResumeEntry
+    from tools.approval_prompt import prompt_dangerous_approval
+
+    emitted = []
+
+    def emit(event):
+        emitted.append(event)
+        pending = registry.take("scoped").pending
+        pending.decision.set_result(
+            approvals.resume_to_decision(
+                [
+                    ResumeEntry(
+                        interrupt_id=pending.interrupt_id,
+                        status="resolved",
+                        payload={"approved": choice != "deny", "scope": choice},
+                    )
+                ],
+                pending.interrupt_id,
+            )
+        )
+        if timeout_race:
+            result = pending.decision.result
+
+            def raced_result(timeout=None):
+                if timeout is not None:
+                    raise TimeoutError
+                return result()
+
+            monkeypatch.setattr(pending.decision, "result", raced_result)
+
+    callback = approvals.make_approval_callback(
+        registry=registry,
+        thread_id="scoped",
+        emit=emit,
+        queue=object(),
+        last_tool_call_id=lambda: "tc",
+        new_id=lambda _: "int",
+        timeout=5,
+    )
+    decision = prompt_dangerous_approval(
+        "save this",
+        "owner consent",
+        approval_callback=callback,
+        title="Save to memory?",
+        **flags,
+    )
+    interrupt = emitted[0][1]
+    assert interrupt.response_schema["properties"]["scope"]["enum"] == scopes
+    assert "Save to memory?" in interrupt.message
+    assert decision == (
+        "deny" if choice == "deny" else choice if choice in scopes else scopes[-1]
+    )

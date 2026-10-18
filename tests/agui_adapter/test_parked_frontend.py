@@ -80,26 +80,57 @@ def test_orphan_result_never_starts_an_agent(peer):
     assert peer.requests == []
 
 
-def test_wrong_id_does_not_consume_live_wait_and_duplicate_does_not_replay(peer):
+@pytest.mark.parametrize("changed_context", [False, True])
+@pytest.mark.parametrize("error", [None, "Browser failed to apply action"])
+def test_wrong_id_does_not_consume_live_wait_and_duplicate_does_not_replay(
+    peer, changed_context, error
+):
     request = frontend_request(peer)
     with TestClient(
         create_app(config_for(peer, [])), base_url="http://127.0.0.1"
     ) as client:
         first = events(client.post("/", json=request))
         call = next(item for item in first if item["type"] == "TOOL_CALL_START")
-        good = result_request(request, call)
+        good = result_request(request, call, "" if error else "CLIENT_RESULT")
+        good["messages"][-1]["error"] = error
+        if changed_context:
+            good["state"] = {"updated": True}
+        relay = client.app.state.executions.get(request["threadId"])
         wrong = copy.deepcopy(good)
         wrong["messages"][-1]["toolCallId"] = "wrong-id"
         error_events(client.post("/", json=wrong))
         assert len(peer.requests) == 1
         events(client.post("/", json=good))
+        assert client.app.state.executions.conversations.get(request["threadId"])
         assert len(peer.requests) == 2
         error_events(client.post("/", json=good))
         assert len(peer.requests) == 2
+        assert relay.agent._user_turn_count == 1
+    before, after = peer.requests
+    assert after["messages"][: len(before["messages"])] == before["messages"]
+    returned = after["messages"][-1]
+    assert (returned["role"], returned["tool_call_id"]) == ("tool", call["toolCallId"])
+    content = returned["content"]
+    if changed_context:
+        envelope = json.loads(content)
+        assert envelope["adapter_context"]["state"] == good["state"]
+        content = envelope["client_tool_result"]
+    if error:
+        assert error in content and "error" in content.lower()
+    else:
+        assert content == "CLIENT_RESULT"
 
 
-def test_schema_change_and_fresh_run_do_not_consume_live_wait(peer):
+@pytest.mark.parametrize("declaration", ["tools", "stateWriterTools"])
+def test_schema_change_and_fresh_run_do_not_consume_live_wait(peer, declaration):
     request = frontend_request(peer)
+    request["state"] = {"nested": [1]}
+    request["tools"][0]["parameters"]["const"] = 1
+    request["forwardedProps"] = {
+        "stateWriterTools": [
+            {"name": "set_probe", "parameters": {"type": "object", "const": 1}}
+        ]
+    }
     with TestClient(
         create_app(config_for(peer, [])), base_url="http://127.0.0.1"
     ) as client:
@@ -107,12 +138,33 @@ def test_schema_change_and_fresh_run_do_not_consume_live_wait(peer):
         call = next(item for item in first if item["type"] == "TOOL_CALL_START")
         good = result_request(request, call)
         changed = copy.deepcopy(good)
-        changed["tools"][0]["description"] = "Changed schema"
+        definitions = (
+            changed["tools"]
+            if declaration == "tools"
+            else changed["forwardedProps"][declaration]
+        )
+        definitions[0]["parameters"]["const"] = True
         error_events(client.post("/", json=changed))
+        relay = client.app.state.executions.get(request["threadId"])
+        pending = relay.pending
+        assert not pending.done()
+        malformed = copy.deepcopy(good)
+        malformed["forwardedProps"] = {"stateWriterTools": [{"name": []}]}
+        error_events(client.post("/", json=malformed))
+        assert relay.pending is pending and not pending.done()
         error_events(client.post("/", json=request))
         assert len(peer.requests) == 1
+        good["tools"][0]["parameters"] = dict(
+            reversed(list(good["tools"][0]["parameters"].items()))
+        )
+        good["state"] = {"nested": [True]}
         events(client.post("/", json=good))
         assert len(peer.requests) == 2
+    before, after = peer.requests
+    assert after["messages"][: len(before["messages"])] == before["messages"]
+    assert after["tools"] == before["tools"]
+    result = json.loads(after["messages"][-1]["content"])
+    assert result["adapter_context"]["state"]["nested"][0] is True
 
 
 def model_call(call_id, name, **args):
@@ -267,14 +319,28 @@ def test_frontend_and_approval_waits_share_one_live_execution(
         ),
     ]
     script_calls(peer, calls if frontend_first else list(reversed(calls)))
+    original_script = peer.script
+    peer.script = lambda incoming, index: (
+        {"role": "assistant", "content": "WARM"}
+        if index == 0
+        else original_script(incoming, index - 1)
+    )
     with TestClient(
         create_app(config_for(peer, ["terminal"])), base_url="http://127.0.0.1"
     ) as client:
+        from tests.agui_adapter.test_conversations import next_user
+
+        previous_id = request["runId"]
+        events(client.post("/", json=request))
+        request = next_user(request)
         first = events(client.post("/", json=request))
         assert target.exists()
         if frontend_first:
             call = next(event for event in first if event["type"] == "TOOL_CALL_START")
             request = result_request(request, call)
+            reused = copy.deepcopy(request)
+            reused["runId"] = previous_id
+            error_events(client.post("/", json=reused))
             first = events(client.post("/", json=request))
         interrupt = first[-1]["outcome"]["interrupts"][0]
         wrong = copy.deepcopy(request)
@@ -288,7 +354,8 @@ def test_frontend_and_approval_waits_share_one_live_execution(
         ]
         error_events(client.post("/", json=wrong))
         assert target.exists()
-        request["runId"] += "-approve"
+        active_id = request["runId"]
+        request["runId"] = wrong["runId"]
         request["resume"] = [
             {
                 "interruptId": interrupt["id"],
@@ -296,14 +363,23 @@ def test_frontend_and_approval_waits_share_one_live_execution(
                 "payload": {"approved": True},
             }
         ]
+        approval_id = request["runId"]
+        for reused_id in (previous_id, active_id):
+            request["runId"] = reused_id
+            error_events(client.post("/", json=request))
+            assert target.exists()
+        request["runId"] = approval_id
         second = events(client.post("/", json=request))
         assert not target.exists()
         if not frontend_first:
             call = next(event for event in second if event["type"] == "TOOL_CALL_START")
             request.pop("resume")
             request = result_request(request, call)
+            reused = copy.deepcopy(request)
+            reused["runId"] = approval_id
+            error_events(client.post("/", json=reused))
             events(client.post("/", json=request))
-    assert len(peer.requests) == 2
+    assert len(peer.requests) == 3
 
 
 def test_frontend_timeout_releases_worker_without_another_model_call(peer):

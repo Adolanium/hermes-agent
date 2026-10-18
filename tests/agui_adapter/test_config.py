@@ -27,13 +27,51 @@ def test_agui_config_and_secret_metadata_are_registered():
     assert token_metadata["password"] is True
 
 
-def test_listener_settings_come_from_config_yaml(isolated_hermes_home, monkeypatch):
-    save_config({"agui": {"host": "0.0.0.0", "port": 9123}})
+@pytest.mark.parametrize(
+    "key,value,expected",
+    [
+        ("port", p, 8000)
+        for p in (True, 1.5, float("inf"), float("nan"), -1, 65536, [], {})
+    ]
+    + [("host", h, "127.0.0.1") for h in ("", " ", [], {}, False)]
+    + [("port", 0, 0), ("port", "0", 0), ("port", 9123, 9123)],
+)
+def test_listener_settings_come_from_config_yaml(
+    isolated_hermes_home, monkeypatch, caplog, key, value, expected
+):
+    import uvicorn
+    from agui_adapter import entry, server
+
+    save_config({"agui": {"host": "127.0.0.1", "port": 0, key: value}})
     monkeypatch.setenv("HERMES_AGUI_HOST", "legacy.example.com")
     monkeypatch.setenv("HERMES_AGUI_PORT", "9999")
     monkeypatch.setenv("PORT", "7777")
 
-    assert _load_listener_config() == ("0.0.0.0", 9123)
+    listener = {"host": "127.0.0.1", "port": 0, key: expected}
+    assert _load_listener_config() == (listener["host"], listener["port"])
+    invalid = value != expected or type(value) is not type(expected)
+    if invalid and value != "0":
+        assert f"agui.{key}" in caplog.text
+
+    def bind(app, **kwargs):
+        assert (kwargs["host"], kwargs["port"]) == (listener["host"], listener["port"])
+        config = uvicorn.Config(app, **kwargs)
+        if config.port == 0:
+            with config.bind_socket() as sock:
+                assert sock.getsockname()[1] > 0
+
+    monkeypatch.setattr(uvicorn, "run", bind)
+    entry.main()
+    if invalid and value != "0":
+        monkeypatch.setattr(
+            server,
+            "create_app",
+            lambda **kw: pytest.fail("invalid override reached app"),
+        )
+        with pytest.raises(SystemExit, match=f"agui.{key}"):
+            entry.main(**{key: value})
+    else:
+        entry.main(**{key: value})
 
 
 def test_agent_settings_come_from_config_yaml(isolated_hermes_home, monkeypatch):

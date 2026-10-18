@@ -2,9 +2,8 @@
 
 from importlib import import_module
 from pathlib import Path
-import tomllib
 
-from setuptools import find_packages
+from setuptools.config.pyprojecttoml import read_configuration
 
 from scripts.build.inputs import project_entries
 
@@ -20,11 +19,8 @@ def test_agui_console_entry_resolves_to_a_callable():
 
 
 def test_declared_package_discovery_includes_the_adapter():
-    manifest = tomllib.loads((ROOT / "pyproject.toml").read_text())
-    options = manifest["tool"]["setuptools"]["packages"]["find"]
-    packages = find_packages(
-        where=str(ROOT), include=options["include"], exclude=options.get("exclude", [])
-    )
+    configuration = read_configuration(str(ROOT / "pyproject.toml"), expand=True)
+    packages = configuration["tool"]["setuptools"]["packages"]
     assert "agui_adapter" in packages
     assert "tests.agui_adapter" not in packages
 

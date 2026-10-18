@@ -130,6 +130,45 @@ def test_bad_host_header_rejected_on_loopback_bind():
     assert r.status_code == 400
 
 
+@pytest.mark.parametrize(
+    "bound_host,authority,status",
+    [
+        ("::1", "[0:0:0:0:0:0:0:1]:0", 200),
+        ("0:0:0:0:0:0:0:1", "::1", 200),
+        ("127.0.0.1", "[::ffff:127.0.0.1]:65535", 200),
+        ("::ffff:127.0.0.1", "localhost", 200),
+        ("127.0.0.1", "localhost:00065535", 200),
+        ("127.0.0.1", "127.0.0.2", 200),
+        ("2001:db8::1", "[2001:0db8:0:0:0:0:0:1]:8000", 200),
+        ("2001:db8::1", "[2001:db8::2]", 400),
+        ("0:0:0:0:0:0:0:0", "example.com:8000", 200),
+        ("127.0.0.1", "[::1]evil.example", 400),
+        ("127.0.0.1", "[::1]:garbage", 400),
+        ("127.0.0.1", "localhost:bad", 400),
+        ("0.0.0.0", "[::1]evil.example", 400),
+        ("0.0.0.0", "localhost:", 400),
+        ("0.0.0.0", "localhost:65536", 400),
+        ("0.0.0.0", "localhost:-1", 400),
+        ("0.0.0.0", "[::1", 400),
+        ("0.0.0.0", "[127.0.0.1]", 400),
+        ("0.0.0.0", ":8000", 400),
+        ("0.0.0.0", "localhost/path?x#y", 400),
+        ("0.0.0.0", "user@localhost", 400),
+        ("0.0.0.0", " localhost ", 400),
+        ("0.0.0.0", "local\x00host", 400),
+        ("::", "bad::ip", 400),
+    ],
+)
+def test_host_authority_middleware(bound_host, authority, status):
+    token = TEST_TOKEN if auth.is_network_accessible(bound_host) else None
+    client = TestClient(create_app(bound_host=bound_host, session_token=token))
+    assert client.get("/health", headers={"Host": authority}).status_code == status
+    if token:
+        assert client.post(
+            "/", json=_run_body(), headers={"Host": authority}
+        ).status_code == (401 if status == 200 else 400)
+
+
 def test_host_accepted_loopback_bind():
     assert auth.host_accepted("127.0.0.1:8000", "127.0.0.1") is True
     assert auth.host_accepted("localhost", "127.0.0.1") is True

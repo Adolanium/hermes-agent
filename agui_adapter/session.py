@@ -93,7 +93,7 @@ class RunState:
 
 
 _registered_frontend_names: set[str] = set()
-_reg_lock = threading.Lock()
+_reg_lock = threading.RLock()
 
 # Toolsets this adapter itself registers into the process-global registry, one
 # per kind of client declaration. An entry in one of these is the adapter's OWN
@@ -134,7 +134,9 @@ def _reject_name_collisions(
     ``discover_builtin_tools()`` at import time, and until that happens the
     registry is empty and every check below passes vacuously.
     """
+    from model_tools import _LEGACY_TOOL_ALIASES
     from tools.registry import registry
+    from tools.tool_search import BRIDGE_TOOL_NAMES
 
     both = set(frontend_names) & set(state_writer_names)
     if both:
@@ -147,7 +149,8 @@ def _reject_name_collisions(
     # already in the registry), so the name stays bound to the state-writer
     # handler while being advertised as client-executed — the same shadowing
     # bug this guard exists to prevent, one layer in.
-    collisions = set()
+    reserved = set(_LEGACY_TOOL_ALIASES) | set(BRIDGE_TOOL_NAMES)
+    collisions = (set(frontend_names) | set(state_writer_names)) & reserved
     for names, own_toolset in (
         (frontend_names, _FRONTEND_TOOLSET),
         (state_writer_names, _STATE_WRITER_TOOLSET),
@@ -457,6 +460,15 @@ def build_run_agent(
 
     settings = _resolve_agent_settings(config)
 
+    names = frontend_tool_names or set()
+    specs = state_writer_specs or {}
+    # Resolution can yield to another build. Claim both kinds together before
+    # constructing an agent; the helpers re-enter this shared registry lock.
+    with _reg_lock:
+        _reject_name_collisions(set(names), set(specs))
+        _ensure_frontend_tools_registered(names)
+        _ensure_state_writer_tools_registered(specs)
+
     kwargs: dict[str, Any] = {
         "platform": "agui",
         "enabled_toolsets": list(config.enabled_toolsets),
@@ -481,14 +493,10 @@ def build_run_agent(
     if default_headers:
         _apply_default_headers(agent, default_headers)
 
-    names = frontend_tool_names or set()
     if names:
-        _ensure_frontend_tools_registered(names)
         _merge_frontend_tools(agent, frontend_tool_schemas or [], names)
 
-    specs = state_writer_specs or {}
     if specs:
-        _ensure_state_writer_tools_registered(specs)
         # State-writer tools are server-executed; advertise them exactly like
         # frontend tools (name + parameters) so the model can call them.
         _merge_frontend_tools(agent, state_writer_schemas or [], set(specs))
@@ -520,6 +528,7 @@ def _expose_tools_eagerly(agent) -> None:
     """
     try:
         import model_tools
+        from tools.registry import registry
 
         eager = (
             model_tools.get_tool_definitions(
@@ -530,11 +539,37 @@ def _expose_tools_eagerly(agent) -> None:
             )
             or []
         )
+        # Registry entries supply dispatch only; their placeholder schemas are
+        # process-global. Advertise only this agent's declarations below.
+        eager = [
+            schema
+            for schema in eager
+            if not (
+                (
+                    entry := registry.get_entry(
+                        (schema.get("function") or {}).get("name")
+                    )
+                )
+                and entry.toolset in _ADAPTER_TOOLSETS
+            )
+        ]
     except Exception:
         logger.debug(
             "eager tool re-assembly failed; leaving agent.tools as built", exc_info=True
         )
         return
+    # Initialization already gated instance-owned provider tools. They are not
+    # registry entries, so retain their schemas without repeating lifecycle hooks.
+    manager = getattr(agent, "_memory_manager", None)
+    context_names = getattr(agent, "_context_engine_tool_names", set())
+    eager_names = {(schema.get("function") or {}).get("name") for schema in eager}
+    for schema in agent.tools or []:
+        name = (schema.get("function") or {}).get("name")
+        if name not in eager_names and (
+            name in context_names or (manager is not None and manager.has_tool(name))
+        ):
+            eager.append(schema)
+            eager_names.add(name)
     agent.tools = eager
     agent.valid_tool_names = {
         t["function"]["name"]

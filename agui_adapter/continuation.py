@@ -10,7 +10,8 @@ import time
 from concurrent.futures import Future, TimeoutError
 
 from ag_ui.core import ToolCallArgsEvent, ToolCallEndEvent, ToolCallStartEvent
-from agui_adapter.translate import parse_state_writer_props
+from agui_adapter.translate import json_contract, parse_state_writer_props
+from agui_adapter.translate import tool_result_content
 from agui_adapter.conversations import ConversationStore, positive_seconds
 
 CURRENT_FRONTEND = contextvars.ContextVar("agui_frontend_relay", default=None)
@@ -90,20 +91,23 @@ class FrontendRelay:
             if time.monotonic() >= self.deadline:
                 self.cancel("Frontend result expired.")
                 raise ContinuationError("Frontend result expired.")
-            if incoming.run_id in self.run_ids:
+            if (
+                incoming.run_id in self.run_ids
+                or incoming.run_id in self.conversation.run_ids
+            ):
                 raise ContinuationError("Continuation requires a new run id.")
-            if incoming.tools != self.initial.tools:
+            if json_contract(incoming.tools) != json_contract(self.initial.tools):
                 raise ContinuationError(
                     "Tool declarations cannot change during continuation."
                 )
-            if parse_state_writer_props(
-                incoming.forwarded_props
-            ) != parse_state_writer_props(self.initial.forwarded_props):
+            if json_contract(
+                parse_state_writer_props(incoming.forwarded_props)
+            ) != json_contract(parse_state_writer_props(self.initial.forwarded_props)):
                 raise ContinuationError(
                     "State-writer declarations cannot change during continuation."
                 )
             prefix = self.initial.messages
-            if incoming.messages[: len(prefix)] != prefix:
+            if json_contract(incoming.messages[: len(prefix)]) != json_contract(prefix):
                 raise ContinuationError(
                     "Continuation changed the accepted message history."
                 )
@@ -122,9 +126,9 @@ class FrontendRelay:
                 raise ContinuationError(
                     "Frontend result does not match the pending call."
                 )
-            result = results[0].content
+            result = tool_result_content(results[0])
             current = _context(incoming)
-            if current != self.context:
+            if json_contract(current) != json_contract(self.context):
                 result = json.dumps(
                     {"client_tool_result": result, "adapter_context": current}
                 )
@@ -133,6 +137,7 @@ class FrontendRelay:
                 if isinstance(incoming.state, dict):
                     self.run_state.state.update(copy.deepcopy(incoming.state))
             self.run_ids.add(incoming.run_id)
+            self.conversation.run_ids.add(incoming.run_id)
             self.pending.set_result(result)
             return self.queue
 

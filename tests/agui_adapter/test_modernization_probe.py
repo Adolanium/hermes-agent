@@ -15,6 +15,7 @@ import pytest
 from agui_adapter.server import create_app
 from agui_adapter.session import AgentConfig
 from hermes_cli.config import save_config
+from tests.waiting import wait_until
 
 
 class ModelPeer(BaseHTTPRequestHandler):
@@ -29,6 +30,22 @@ class ModelPeer(BaseHTTPRequestHandler):
 
     def do_POST(self):
         request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        if getattr(self.server, "capture_status", None) and self.path in (
+            "/v1/messages",
+            "/v1/responses",
+        ):
+            self.server.requests.append(request)
+            self.server.request_paths.append(self.path)
+            self.send_response(self.server.capture_status)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            error = getattr(
+                self.server,
+                "capture_error",
+                b'{"error":{"type":"authentication_error","message":"capture complete"}}',
+            )
+            self.wfile.write(error)
+            return
         if "messages" not in request:
             self.send_response(404)
             self.send_header("Content-Length", "0")
@@ -272,3 +289,134 @@ def test_real_agent_approval_park_and_resume(peer, tmp_path, approved):
         ] == started
     assert target.exists() is (not approved)
     assert len(peer.requests) == 2
+
+
+@pytest.mark.parametrize("kind", ["frontend", "writer-list", "writer-map"])
+def test_duplicate_declarations_rejected_before_conversation(peer, kind):
+    peer.script = lambda *_: {"role": "assistant", "content": "unexpected model call"}
+    declarations = [
+        {
+            "name": "agui_duplicate_" + kind.replace("-", "_"),
+            "description": "Update shared state",
+            "stateKey": key,
+            "arg": key,
+            "parameters": {
+                "type": "object",
+                "properties": {key: {"type": value_type}},
+            },
+        }
+        for key, value_type in [("notes", "array"), ("recipe", "object")]
+    ]
+    request = body("duplicate-declaration")
+    if kind == "frontend":
+        request["tools"] = declarations
+    else:
+        writers = (
+            dict(zip(("notes", "recipe"), declarations))
+            if kind == "writer-map"
+            else declarations
+        )
+        request["forwardedProps"] = {"stateWriterTools": writers}
+    with TestClient(
+        create_app(config_for(peer, [])), base_url="http://127.0.0.1"
+    ) as client:
+        response = client.post("/", json=request)
+    assert response.status_code == 200, response.text
+    frames = [
+        json.loads(line[5:])
+        for line in response.text.splitlines()
+        if line.startswith("data:")
+    ]
+    assert [frame["type"] for frame in frames] == ["RUN_STARTED", "RUN_ERROR"]
+    assert frames[-1]["message"]
+    assert not peer.requests
+
+
+@pytest.mark.parametrize(
+    "writers",
+    [
+        "unsupported",
+        1,
+        [None],
+        {"x": None},
+        [{}],
+        *[{"x": {"name": name}} for name in ([], {}, "", " ", 1)],
+        *[[{"name": name}] for name in (["x"], {"x": 1})],
+        *[
+            {"x": {key: value}}
+            for key in ("stateKey", "state_key")
+            for value in (None, [], {}, 1)
+        ],
+        {"x": {"stateKey": "ok", "state_key": []}},
+        *[
+            {"x": {key: value}}
+            for key in ("arg", "description")
+            for value in (False, [], {})
+        ],
+        {"x": {"parameters": False}},
+    ],
+)
+def test_malformed_writers_rejected_before_conversation(peer, writers):
+    peer.script = lambda *_: {"role": "assistant", "content": "unexpected model call"}
+    request = body("invalid-writer")
+    request["forwardedProps"] = {"stateWriterTools": writers}
+    app = create_app(config_for(peer, []))
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        response = client.post("/", json=request)
+        assert response.status_code == 200, response.text
+        frames = [
+            json.loads(line[5:])
+            for line in response.text.splitlines()
+            if line.startswith("data:")
+        ]
+        assert [frame["type"] for frame in frames] == ["RUN_STARTED", "RUN_ERROR"]
+        assert frames[-1]["message"]
+        assert not peer.requests
+        assert not app.state.executions.active
+        assert not app.state.executions.conversations.records
+
+
+@pytest.mark.parametrize("status", [401, 400])
+@pytest.mark.parametrize("mode", ["anthropic_messages", "codex_responses"])
+def test_initial_frontend_data_reaches_native_user_tail_with_hermes_prompt(
+    peer, mode, status, monkeypatch, tmp_path
+):
+    from tests.agui_adapter.test_parked_frontend import error_events
+
+    home = tmp_path / "native-home"
+    home.mkdir()
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    (home / "SOUL.md").write_text("Identity: HERMES_NATIVE_SENTINEL.\n")
+    save_config({"auxiliary": {"title_generation": {"enabled": False}}})
+    config = config_for(peer, [])
+    config.api_mode = mode
+    config.model = "claude-sonnet-4-6" if mode == "anthropic_messages" else "gpt-4.1"
+    peer.capture_status, peer.request_paths = status, []
+    if status == 400:
+        peer.capture_error = (
+            b'{"error":{"type":"content_filter","message":"content_filter"}}'
+        )
+    request = body("native-" + mode)
+    request["context"] = [{"description": "name", "value": "CONTEXT_SENTINEL"}]
+    request["forwardedProps"] = {"tone": "PROPS_SENTINEL"}
+    request["state"] = {"recipe": "STATE_SENTINEL"}
+    with TestClient(create_app(config), base_url="http://127.0.0.1") as client:
+        response = client.post("/", json=request)
+        assert error_events(response)[-1]["message"] == "The agent run failed."
+        wait_until(
+            lambda: not client.app.state.executions.conversations.records,
+            timeout=10,
+            what="failed conversation retirement",
+        )
+    assert peer.request_paths == [
+        "/v1/messages" if mode == "anthropic_messages" else "/v1/responses"
+    ]
+    (payload,) = peer.requests
+    prompt = payload["system" if mode == "anthropic_messages" else "instructions"]
+    assert "HERMES_NATIVE_SENTINEL" in str(prompt)
+    (user,) = payload["messages" if mode == "anthropic_messages" else "input"]
+    assert user["role"] == "user"
+    assert request["messages"][0]["content"] in str(user["content"])
+    for sentinel in ("CONTEXT_SENTINEL", "PROPS_SENTINEL", "STATE_SENTINEL"):
+        assert sentinel in str(user["content"])
+        assert sentinel not in str(prompt)
