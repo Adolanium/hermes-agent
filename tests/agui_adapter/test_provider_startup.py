@@ -10,8 +10,11 @@ import sys
 import httpx
 import pytest
 
-from hermes_cli.config import save_config
-from tests.agui_adapter.test_modernization_probe import body, events
+from agui_adapter.session import AgentConfig, _resolve_agent_settings, build_run_agent
+from hermes_cli.config import load_config, save_config
+from hermes_cli.runtime_provider import resolve_runtime_provider
+from hermes_constants import resolve_reasoning_config
+from tests.agui_adapter.test_modernization_probe import body, config_for, events
 from tests.waiting import wait_until
 
 
@@ -121,3 +124,125 @@ def test_entry_points_use_configured_provider_and_discover_plugin_tools(peer, la
                 failure.add_note(stderr[-7000:])
         assert process.returncode == -signal.SIGTERM, stderr
         assert "Traceback" not in stderr
+
+
+@pytest.fixture
+def opencode_profile():
+    from hermes_cli.auth import write_credential_pool
+
+    save_config(
+        {
+            "model": {"provider": "opencode-zen", "default": "glm-5"},
+            "agui": {"model": "claude-sonnet-4-6", "toolsets": []},
+            "auxiliary": {"title_generation": {"enabled": False}},
+        }
+    )
+    write_credential_pool(
+        "opencode-zen",
+        [
+            {
+                "id": "local-key",
+                "label": "local-key",
+                "auth_type": "api_key",
+                "priority": 0,
+                "source": "manual",
+                "access_token": "sk-local-only",
+            }
+        ],
+    )
+    return AgentConfig()
+
+
+def test_effective_model_selects_runtime_protocol(opencode_profile):
+    config = opencode_profile
+    expected = resolve_runtime_provider(
+        requested="opencode-zen", target_model=config.model
+    )
+    settings = _resolve_agent_settings(config)
+    assert settings["model"] == config.model == "claude-sonnet-4-6"
+    assert expected["api_mode"] == "anthropic_messages"
+    assert settings["api_mode"] == expected["api_mode"]
+    assert settings["base_url"] == expected["base_url"]
+    config.api_mode = "chat_completions"
+    assert _resolve_agent_settings(config)["api_mode"] == "chat_completions"
+
+
+def test_real_resolver_pool_reaches_agent_by_identity(opencode_profile, monkeypatch):
+    from hermes_cli import runtime_provider
+
+    resolved = []
+
+    def record_resolution(**kwargs):
+        runtime = resolve_runtime_provider(**kwargs)
+        resolved.append(runtime)
+        return runtime
+
+    monkeypatch.setattr(runtime_provider, "resolve_runtime_provider", record_resolution)
+    agent = build_run_agent(opencode_profile)
+    try:
+        pool = resolved[0]["credential_pool"]
+        assert pool is not None
+        assert agent._credential_pool is pool
+    finally:
+        agent.close()
+
+
+@pytest.mark.parametrize("disabled", ["terminal", ["terminal"]])
+@pytest.mark.parametrize("explicit_endpoint", [False, True])
+def test_global_disabled_toolsets_reach_admission_and_wire(
+    peer, disabled, explicit_endpoint
+):
+    endpoint = f"http://127.0.0.1:{peer.server_port}/v1"
+    save_config(
+        {
+            "model": {"provider": "custom", "default": "gpt-4o", "base_url": endpoint},
+            "agent": {"disabled_toolsets": disabled},
+            "agui": {"toolsets": ["terminal", "file"]},
+            "auxiliary": {"title_generation": {"enabled": False}},
+        }
+    )
+    config = (
+        config_for(peer, ["terminal", "file"]) if explicit_endpoint else AgentConfig()
+    )
+    peer.script = lambda request, index: {"role": "assistant", "content": "POLICY_OK"}
+    agent = build_run_agent(config)
+    try:
+        assert "terminal" not in agent.valid_tool_names
+        assert "read_file" in agent.valid_tool_names
+        assert "POLICY_OK" in agent.chat("Reply POLICY_OK without using tools")
+        advertised = {tool["function"]["name"] for tool in peer.requests[0]["tools"]}
+        assert "terminal" not in advertised
+        assert "read_file" in advertised
+    finally:
+        agent.close()
+
+
+@pytest.mark.parametrize("override", [None, "none"])
+def test_reasoning_policy_reaches_explicit_endpoint_for_effective_model(peer, override):
+    policy = {"reasoning_effort": "high"}
+    if override:
+        policy["reasoning_overrides"] = {"o3-mini": override}
+    save_config(
+        {
+            "model": {"default": "gpt-4o"},
+            "agent": policy,
+            "auxiliary": {"title_generation": {"enabled": False}},
+        }
+    )
+    config = config_for(peer, [])
+    config.model = "o3-mini"
+    expected = resolve_reasoning_config(load_config(), config.model)
+    assert expected == (
+        {"enabled": False} if override else {"enabled": True, "effort": "high"}
+    )
+    peer.script = lambda request, index: {
+        "role": "assistant",
+        "content": "REASONING_OK",
+    }
+    agent = build_run_agent(config)
+    try:
+        assert "REASONING_OK" in agent.chat("Reply REASONING_OK")
+        effort = peer.requests[0].get("reasoning_effort")
+        assert effort == (expected.get("effort") if expected["enabled"] else "none")
+    finally:
+        agent.close()

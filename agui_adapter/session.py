@@ -408,7 +408,10 @@ def _resolve_agent_settings(config: AgentConfig) -> dict:
         "args": None,
     }
     try:
-        runtime = resolve_runtime_provider(requested=config.provider or config_provider)
+        runtime = resolve_runtime_provider(
+            requested=config.provider or config_provider,
+            target_model=settings["model"] or None,
+        )
         settings.update(
             provider=runtime.get("provider") or settings["provider"],
             base_url=runtime.get("base_url"),
@@ -416,6 +419,7 @@ def _resolve_agent_settings(config: AgentConfig) -> dict:
             api_mode=config.api_mode or runtime.get("api_mode"),
             command=runtime.get("command"),
             args=list(runtime.get("args") or []),
+            credential_pool=runtime.get("credential_pool"),
         )
     except Exception:
         logger.warning(
@@ -448,6 +452,9 @@ def build_run_agent(
     ``RunState`` is seeded and its snapshots are emitted.
     """
     from run_agent import AIAgent
+    from agent.skill_utils import parse_config_string_list
+    from hermes_cli.config import load_config
+    from hermes_constants import resolve_reasoning_config
 
     # Reject shadowing declarations before anything is merged or registered.
     # Keep this BELOW the run_agent import: that import is what populates the
@@ -459,6 +466,7 @@ def build_run_agent(
     )
 
     settings = _resolve_agent_settings(config)
+    profile = load_config()
 
     names = frontend_tool_names or set()
     specs = state_writer_specs or {}
@@ -472,6 +480,12 @@ def build_run_agent(
     kwargs: dict[str, Any] = {
         "platform": "agui",
         "enabled_toolsets": list(config.enabled_toolsets),
+        "disabled_toolsets": parse_config_string_list(
+            (profile.get("agent") or {}).get("disabled_toolsets")
+        )
+        or None,
+        "reasoning_config": resolve_reasoning_config(profile, settings["model"]),
+        "credential_pool": settings.get("credential_pool"),
         "quiet_mode": True,
         "model": settings["model"],
         "provider": settings["provider"],

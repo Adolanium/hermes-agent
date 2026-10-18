@@ -230,6 +230,29 @@ def test_bad_host_header_rejected_on_post_route():
 # --- entry.main(): the authoritative fail-closed guard ----------------------
 
 
+def test_setup_logging_redacts_credentials_in_messages_and_tracebacks(monkeypatch):
+    import io
+    import logging
+    from agui_adapter import entry
+
+    stream = io.StringIO()
+    monkeypatch.setattr(entry.sys, "stderr", stream)
+    entry._setup_logging()
+    logger = logging.getLogger("agui_adapter.server")
+    secret = "sk-demo12345678901234567890"
+    logger.warning("request credential: %s", secret)
+    try:
+        raise RuntimeError(f"upstream credential: {secret}")
+    except RuntimeError:
+        logger.exception("run failed")
+    output = stream.getvalue()
+    assert secret not in output
+    assert "request credential:" in output
+    assert "run failed" in output
+    assert "Traceback (most recent call last):" in output
+    assert "RuntimeError: upstream credential:" in output
+
+
 def test_entry_main_refuses_non_loopback_without_token(monkeypatch):
     from agui_adapter import entry
 
@@ -320,6 +343,15 @@ def test_usable_rejects_placeholders_and_accepts_strong():
     # path — "your_api_key_here" (17 chars) is in hermes_cli's placeholder set.
     assert auth._usable("your_api_key_here") is False
     assert auth._usable(TEST_TOKEN) is True
+
+
+@pytest.mark.parametrize(
+    "token", ["changeme00000000", "placeholder-value", "  PLACEHOLDER-VALUE  "]
+)
+def test_normal_helper_rejects_adapter_placeholders_before_network_bind(token):
+    assert auth._usable(token) is False
+    with pytest.raises(SystemExit):
+        auth.require_token_or_refuse("0.0.0.0", token)
 
 
 def test_create_app_neutralizes_interrupt_preempting_env(monkeypatch):

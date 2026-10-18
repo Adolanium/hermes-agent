@@ -43,9 +43,11 @@ import sys
 
 
 def _setup_logging() -> None:
+    from agent.redact import RedactingFormatter
+
     handler = logging.StreamHandler(sys.stderr)
     handler.setFormatter(
-        logging.Formatter(
+        RedactingFormatter(
             "%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%H:%M:%S"
         )
     )

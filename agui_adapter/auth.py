@@ -23,6 +23,8 @@ _SESSION_HEADER_NAME = "X-Hermes-Session-Token"
 
 
 def _usable(token: Optional[str]) -> bool:
+    if (token or "").strip().lower() in {"changeme00000000", "placeholder-value"}:
+        return False
     try:
         from hermes_cli.auth import has_usable_secret
 
