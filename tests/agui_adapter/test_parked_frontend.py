@@ -91,6 +91,16 @@ def test_wrong_id_does_not_consume_live_wait_and_duplicate_does_not_replay(
     ) as client:
         first = events(client.post("/", json=request))
         call = next(item for item in first if item["type"] == "TOOL_CALL_START")
+        lifecycle = [item for item in first if item["type"].startswith("TOOL_CALL_")]
+        assert [item["type"] for item in lifecycle] == [
+            "TOOL_CALL_START",
+            "TOOL_CALL_ARGS",
+            "TOOL_CALL_END",
+        ]
+        assert {item["toolCallId"] for item in lifecycle} == {"probe-call-1"}
+        assert json.loads(lifecycle[1]["delta"]) == peer.tool_args
+        assert first.index(lifecycle[-1]) < len(first) - 1
+        assert first[-1]["type"] == "RUN_FINISHED"
         good = result_request(request, call, "" if error else "CLIENT_RESULT")
         good["messages"][-1]["error"] = error
         if changed_context:

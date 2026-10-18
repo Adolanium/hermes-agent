@@ -100,11 +100,16 @@ class Conversation:
 
             def close_resources():
                 from tools.approval import clear_session
+                from tools.terminal_tool import _qualify_task_key
+                from tools.terminal_tool_lifecycle import cleanup_vm
 
                 try:
                     self.agent.close()
                 finally:
-                    clear_session(self.approval_key)
+                    try:
+                        cleanup_vm(_qualify_task_key(f"session:{self.approval_key}"))
+                    finally:
+                        clear_session(self.approval_key)
 
             self.profile_context.copy().run(close_resources)
 

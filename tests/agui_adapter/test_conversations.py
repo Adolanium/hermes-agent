@@ -208,14 +208,17 @@ def test_failure_after_execution_retires_agent_without_replaying(
         run = agents[0].run_conversation
         close = Mock(wraps=agents[0].close)
         monkeypatch.setattr(agents[0], "close", close)
+        failed_relays = []
 
         def fail_after_execution(*args, **kwargs):
             run(*args, **kwargs)
+            failed_relays.append(app.state.executions.get(request["threadId"]))
             raise RuntimeError("injected post-execution failure")
 
         monkeypatch.setattr(agents[0], "run_conversation", fail_after_execution)
         followup = next_user(request)
         error_events(client.post("/", json=followup))
+        assert failed_relays[0].finished.wait(timeout=10)
         assert app.state.executions.conversations.get(request["threadId"]) is None
         assert close.call_count == 1
         error_events(client.post("/", json=followup))

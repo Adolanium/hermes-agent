@@ -596,10 +596,17 @@ async def test_state_writer_tool_emits_snapshot(client):
     assert "NOTES saved" in text
 
 
-def test_error_closes_open_lifecycles_before_run_error(monkeypatch):
-    """If the worker raises after opening a text lifecycle (streamed some
-    assistant text via ``stream_delta_callback``), the bridge must close it
-    (TEXT_MESSAGE_END) BEFORE the terminal RUN_ERROR — otherwise the client
+@pytest.mark.parametrize(
+    "callback, prefix",
+    [
+        ("stream_delta_callback", "TEXT_MESSAGE"),
+        ("reasoning_callback", "REASONING_MESSAGE"),
+    ],
+)
+def test_error_closes_open_lifecycles_before_run_error(monkeypatch, callback, prefix):
+    """If the worker raises after opening a text or reasoning lifecycle
+    through its stream callback, the bridge must close it with a matching
+    END BEFORE the terminal RUN_ERROR — otherwise the client
     sees a message stuck perpetually "streaming". The reported error message
     must be controlled (no raw exception text leaked)."""
     from agui_adapter import server
@@ -618,7 +625,7 @@ def test_error_closes_open_lifecycles_before_run_error(monkeypatch):
                 setattr(self, a, None)
 
         def run_conversation(self, user_message, conversation_history=None):
-            self.stream_delta_callback("partial answer")
+            getattr(self, callback)("partial answer")
             raise RuntimeError("boom")
 
     monkeypatch.setattr(server, "build_run_agent", lambda *a, **k: _FakeAgent())
@@ -636,9 +643,18 @@ def test_error_closes_open_lifecycles_before_run_error(monkeypatch):
     with TestClient(create_app(), base_url="http://127.0.0.1") as client:
         r = client.post("/", json=body)
         assert r.status_code == 200
-        assert "TEXT_MESSAGE_END" in r.text
-        assert "RUN_ERROR" in r.text
-        assert r.text.index("TEXT_MESSAGE_END") < r.text.index("RUN_ERROR")
+        events = [
+            json.loads(line[6:])
+            for line in r.text.splitlines()
+            if line.startswith("data: ")
+        ]
+        start, content, end = [e for e in events if e["type"].startswith(prefix)]
+        assert [e["type"] for e in (start, content, end)] == [
+            f"{prefix}_{suffix}" for suffix in ("START", "CONTENT", "END")
+        ]
+        assert start["messageId"] == content["messageId"] == end["messageId"]
+        assert events.index(end) < len(events) - 1
+        assert events[-1] == {"type": "RUN_ERROR", "message": "The agent run failed."}
         assert "boom" not in r.text
 
 

@@ -88,20 +88,25 @@ def test_eager_catalog_uses_only_current_adapter_declarations(peer, toolset, kin
 
 
 @pytest.mark.parametrize("toolsets", [["memory"], []])
+@pytest.mark.parametrize("kind", [None, "frontend", "state_writer"])
 def test_eager_catalog_preserves_initialized_memory_provider(
-    peer, monkeypatch, toolsets
+    peer, monkeypatch, toolsets, kind
 ):
     import json
     from unittest.mock import Mock
 
     import plugins.memory
-    from agui_adapter.session import build_run_agent
+    from agui_adapter.session import (
+        StateWriterSpec,
+        ToolNameCollisionError,
+        build_run_agent,
+    )
     from hermes_cli.config import save_config
     from tests.agent.test_memory_provider import FakeMemoryProvider
     from tests.agui_adapter.test_modernization_probe import config_for
 
     schema = {
-        "name": "agui_local_memory_search",
+        "name": f"agui_local_memory_search_{kind or 'ordinary'}",
         "description": "Search local provider memory",
         "parameters": {"type": "object", "properties": {}},
     }
@@ -110,6 +115,20 @@ def test_eager_catalog_preserves_initialized_memory_provider(
     monkeypatch.setattr(provider, "initialize", initialize)
     monkeypatch.setattr(plugins.memory, "load_memory_provider", lambda name: provider)
     save_config({"memory": {"provider": provider.name}})
+    if kind:
+        declaration = (
+            {"frontend_tool_names": {schema["name"]}}
+            if kind == "frontend"
+            else {
+                "state_writer_specs": {
+                    schema["name"]: StateWriterSpec(state_key="x", arg="x")
+                }
+            }
+        )
+        with pytest.raises(ToolNameCollisionError, match=schema["name"]):
+            build_run_agent(config_for(peer, toolsets), **declaration)
+        assert provider.initialized and provider.shutdown_called
+        return
     agent = build_run_agent(config_for(peer, toolsets))
     try:
         assert provider.initialized and initialize.call_count == 1
@@ -123,3 +142,36 @@ def test_eager_catalog_preserves_initialized_memory_provider(
             assert result == {"handled": schema["name"], "args": {}}
     finally:
         agent.close()
+
+
+@pytest.mark.parametrize("kind", ["frontend", "state_writer"])
+def test_eager_catalog_rejects_initialized_context_owner(peer, monkeypatch, kind):
+    from agent.context_compressor import ContextCompressor
+    from agui_adapter.session import (
+        StateWriterSpec,
+        ToolNameCollisionError,
+        build_run_agent,
+    )
+    from tests.agui_adapter.test_modernization_probe import config_for
+
+    name = f"agui_context_owner_{kind}"
+    schema = {"name": name, "parameters": {"type": "object", "properties": {}}}
+    monkeypatch.setattr(ContextCompressor, "get_tool_schemas", lambda self: [schema])
+    config = config_for(peer, ["context_engine"])
+    agent = build_run_agent(config)
+    try:
+        assert isinstance(agent.context_compressor, ContextCompressor)
+        assert name in agent._context_engine_tool_names
+        assert {t["function"]["name"]: t["function"] for t in agent.tools}[
+            name
+        ] == schema
+        assert name in agent.valid_tool_names
+    finally:
+        agent.close()
+    declaration = (
+        {"frontend_tool_names": {name}}
+        if kind == "frontend"
+        else {"state_writer_specs": {name: StateWriterSpec(state_key="x", arg="x")}}
+    )
+    with pytest.raises(ToolNameCollisionError, match=name):
+        build_run_agent(config, **declaration)

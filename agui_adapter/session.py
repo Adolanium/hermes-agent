@@ -134,7 +134,9 @@ def _reject_name_collisions(
     ``discover_builtin_tools()`` at import time, and until that happens the
     registry is empty and every check below passes vacuously.
     """
+    from agent.inline_tool_executors import INLINE_TOOL_EXECUTORS
     from model_tools import _LEGACY_TOOL_ALIASES
+    from tools.connectors.gateway.names import is_connector_name
     from tools.registry import registry
     from tools.tool_search import BRIDGE_TOOL_NAMES
 
@@ -150,6 +152,7 @@ def _reject_name_collisions(
     # handler while being advertised as client-executed — the same shadowing
     # bug this guard exists to prevent, one layer in.
     reserved = set(_LEGACY_TOOL_ALIASES) | set(BRIDGE_TOOL_NAMES)
+    reserved |= set(INLINE_TOOL_EXECUTORS)
     collisions = (set(frontend_names) | set(state_writer_names)) & reserved
     for names, own_toolset in (
         (frontend_names, _FRONTEND_TOOLSET),
@@ -157,7 +160,9 @@ def _reject_name_collisions(
     ):
         for name in names:
             entry = registry.get_entry(name)
-            if entry is not None and entry.toolset != own_toolset:
+            if is_connector_name(name) or (
+                entry is not None and entry.toolset != own_toolset
+            ):
                 collisions.add(name)
     if collisions:
         raise ToolNameCollisionError(collisions)
@@ -501,6 +506,16 @@ def build_run_agent(
         kwargs["args"] = list(settings.get("args") or [])
 
     agent = AIAgent(**kwargs)
+    manager = getattr(agent, "_memory_manager", None)
+    collisions = {
+        name
+        for name in set(names) | set(specs)
+        if name in getattr(agent, "_context_engine_tool_names", set())
+        or (manager is not None and manager.has_tool(name))
+    }
+    if collisions:
+        agent.close()
+        raise ToolNameCollisionError(collisions)
     _expose_tools_eagerly(agent)
     if cwd:
         agent.session_cwd = cwd

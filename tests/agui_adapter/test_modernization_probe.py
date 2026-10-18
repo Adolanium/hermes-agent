@@ -247,7 +247,14 @@ def test_real_frontend_handoff_and_resume_preserve_wire_history(
 
 
 @pytest.mark.parametrize("approved", [True, False])
-def test_real_agent_approval_park_and_resume(peer, tmp_path, approved):
+def test_real_agent_approval_park_and_resume(peer, tmp_path, approved, request):
+    from hermes_constants import set_hermes_home_override, reset_hermes_home_override
+    from tools.terminal_tool import _active_environments, _qualify_task_key
+
+    owner = tmp_path / "owner"
+    owner.mkdir()
+    token = set_hermes_home_override(owner)
+    request.addfinalizer(lambda: reset_hermes_home_override(token))
     target = tmp_path / "disposable-removal"
     target.mkdir()
     (target / "owned.txt").write_text("disposable test data")
@@ -260,11 +267,16 @@ def test_real_agent_approval_park_and_resume(peer, tmp_path, approved):
             "terminal": {"env": "local"},
         }
     )
-    request = body("approval-probe")
+    run_input = body("approval-probe")
     with TestClient(
         create_app(config_for(peer, ["terminal"])), base_url="http://127.0.0.1"
     ) as client:
-        first = events(client.post("/", json=request))
+        first = events(client.post("/", json=run_input))
+        record = client.app.state.executions.conversations.get(run_input["threadId"])
+        terminal_key = record.profile_context.copy().run(
+            _qualify_task_key, f"session:{record.approval_key}"
+        )
+        assert terminal_key != f"session:{record.approval_key}"
         outcome = first[-1].get("outcome", {})
         assert outcome["type"] == "interrupt", first
         started = [e["toolCallId"] for e in first if e["type"] == "TOOL_CALL_START"]
@@ -273,20 +285,22 @@ def test_real_agent_approval_park_and_resume(peer, tmp_path, approved):
         assert not any(e["type"] == "TOOL_CALL_RESULT" for e in first)
         assert target.exists(), "effect occurred before approval"
         assert len(peer.requests) == 1
-        request["runId"] = "leg-2"
-        request["resume"] = [
+        run_input["runId"] = "leg-2"
+        run_input["resume"] = [
             {
                 "interruptId": outcome["interrupts"][0]["id"],
                 "status": "resolved",
                 "payload": {"approved": approved, "scope": "once"},
             }
         ]
-        second = events(client.post("/", json=request))
+        second = events(client.post("/", json=run_input))
         assert second[-1]["outcome"]["type"] == "success", second
         assert not any(e["type"] == "TOOL_CALL_END" for e in second)
         assert [
             e["toolCallId"] for e in second if e["type"] == "TOOL_CALL_RESULT"
         ] == started
+        assert terminal_key in _active_environments
+    assert terminal_key not in _active_environments
     assert target.exists() is (not approved)
     assert len(peer.requests) == 2
 

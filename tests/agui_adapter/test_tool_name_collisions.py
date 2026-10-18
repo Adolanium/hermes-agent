@@ -170,9 +170,14 @@ class TestGuardIsWiredIntoBuildRunAgent:
     """
 
     @pytest.mark.parametrize("kind", ["frontend", "state_writer"])
+    @pytest.mark.parametrize(
+        "connector_name",
+        ["connectors__demo__read", "connectors__malformed", "connectors__execute"],
+    )
     def test_dispatch_reserved_names_rejected_before_resolution(
-        self, registry, monkeypatch, kind
+        self, registry, monkeypatch, kind, connector_name
     ):
+        from agent.inline_tool_executors import INLINE_TOOL_EXECUTORS
         from agui_adapter import session
         from model_tools import _LEGACY_TOOL_ALIASES
         from tools.tool_search import BRIDGE_TOOL_NAMES
@@ -184,7 +189,8 @@ class TestGuardIsWiredIntoBuildRunAgent:
             "_resolve_agent_settings",
             lambda config: pytest.fail("reserved name reached agent resolution"),
         )
-        for name in sorted(set(_LEGACY_TOOL_ALIASES) | set(BRIDGE_TOOL_NAMES)):
+        reserved = set(_LEGACY_TOOL_ALIASES) | set(BRIDGE_TOOL_NAMES)
+        for name in sorted(reserved | set(INLINE_TOOL_EXECUTORS) | {connector_name}):
             kwargs = (
                 {"frontend_tool_names": {name}}
                 if kind == "frontend"
