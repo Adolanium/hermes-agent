@@ -2,6 +2,7 @@
 
 import ast
 import logging
+import os
 import time
 
 import pytest
@@ -1426,6 +1427,18 @@ class TestCredentialStoreReads:
     WEAK = "hunter2weak"  # a human password: no vendor prefix, not opaque-looking
 
     @staticmethod
+    def _attested(command, *stores):
+        """The local executor's attestation, recorded before ``command`` runs. Stores are aged
+        past the racy-signature window, as any store not edited seconds earlier is."""
+        from agent.redact import local_execution
+
+        aged = time.time() - 60
+        for store in stores:
+            if store.exists():
+                os.utime(store, (aged, aged))
+        return local_execution(command, None)
+
+    @staticmethod
     def _numbered(lines, start=1):
         return "\n".join(f"{i}|{line}" for i, line in enumerate(lines, start))  # read_file gutter
 
@@ -1499,7 +1512,7 @@ class TestCredentialStoreReads:
                      "6|macdef init", "7|cd /pub"):
             assert kept in out
         assert "5|  password «redacted-secret»" in out
-        assert redact_terminal_output(netrc_text, "cat ~/.netrc", force=True) == netrc_text.replace(
+        assert redact_terminal_output(netrc_text, "cat ~/.netrc", force=True, from_start=True) == netrc_text.replace(
             "hunter2weak", "«redacted-secret»")
 
         # Options are secret by the redactor's word-bounded key policy: ``author`` is not ``auth``.
@@ -1537,7 +1550,8 @@ class TestCredentialStoreReads:
         app_lines = ["CANARY_ALPHA_LINE_ONE", "password = fetch()", "    CANARY_BETA_LINE_TWO"]
         text = output.format(store=store, body=body, pw=self.WEAK, app_line=app_lines[1],
                              app="".join(f"{line}\n" for line in app_lines))
-        out = redact_terminal_output(text, command.format(store=store, pw=self.WEAK), source_backend="local")
+        command = command.format(store=store, pw=self.WEAK)
+        out = redact_terminal_output(text, command, execution=self._attested(command, store), from_start=True)
         assert self.WEAK not in out
         assert all(line in out for line in app_lines if line in text)
 
@@ -1552,14 +1566,17 @@ class TestCredentialStoreReads:
         other.parent.mkdir()
         other.write_text("machine a\npassword\nsomethingElse42\n", encoding="utf-8", newline="\n")
         for store in (missing, other):
-            out = redact_terminal_output(f"{self.WEAK}\nCANARY\n", f"tail -n 1 {store} && cat app.py",
-                                         source_backend="local")
+            command = f"tail -n 1 {store} && cat app.py"
+            out = redact_terminal_output(f"{self.WEAK}\nCANARY\n", command, execution=self._attested(command, store),
+                                         from_start=True)
             assert self.WEAK not in out
 
         short = tmp_path / "short" / ".netrc"
         short.parent.mkdir()
         short.write_text("machine a\npassword\npw1\n", encoding="utf-8", newline="\n")
-        out = redact_terminal_output("pw1\nCANARY\n", f"tail -n 1 {short} && cat app.py", source_backend="local")
+        command = f"tail -n 1 {short} && cat app.py"
+        out = redact_terminal_output("pw1\nCANARY\n", command, execution=self._attested(command, short),
+                                     from_start=True)
         assert "pw1" not in out
 
     def test_mixed_redaction_forgets_a_secret_when_the_store_changes(self, tmp_path):
@@ -1575,14 +1592,16 @@ class TestCredentialStoreReads:
         new = "second-secret-value"
         store.write_text(f"machine a\nlogin bob\npassword {old}\n", encoding="utf-8", newline="\n")
         command = f"tail -n 1 {store} && echo other"
-        out = redact_terminal_output(f"{old}\nCANARY\n", command, source_backend="local")
+        execution = self._attested(command, store)
+        out = redact_terminal_output(f"{old}\nCANARY\n", command, execution=execution, from_start=True)
         assert old not in out
         assert "CANARY" in out
-        out = redact_terminal_output(f"{old}\nCANARY\n", command, source_backend="local")
+        out = redact_terminal_output(f"{old}\nCANARY\n", command, execution=execution, from_start=True)
         assert old not in out
 
         store.write_text(f"machine a\nlogin bob\npassword {new}\n", encoding="utf-8", newline="\n")
-        out = redact_terminal_output(f"{old}\n{new}\nCANARY\n", command, source_backend="local")
+        out = redact_terminal_output(f"{old}\n{new}\nCANARY\n", command, execution=self._attested(command, store),
+                                     from_start=True)
         assert new not in out
         assert old in out
         assert "CANARY" in out

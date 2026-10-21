@@ -18,17 +18,24 @@ also carry other files (``cat ~/.netrc app.py``, ``tail -n 1 ~/.netrc && cat app
 
 * a grep line whose ``path:N:`` prefix names the store is store content and gets the grammar;
   a line naming another file is never parsed by it;
-* for lines with no owner, a complete snapshot from the producing backend supplies the
-  values to mask, leaving other output intact;
-* an unknown backend, an incomplete or unreadable snapshot, or output inconsistent with the
-  snapshot uses the catch-all. This may mask other output rather than pass a stored value.
+* for lines with no owner, a complete snapshot of the exact store version the command read
+  supplies the values to mask, leaving other output intact. Only a local executor can attest
+  that version (``LocalExecution``): the HOME its shell expands ``~`` against and each store's
+  file signature taken before the command ran;
+* no attestation (a remote or unknown backend), a store changed since that signature, an
+  incomplete or unreadable snapshot, or output inconsistent with the snapshot uses the
+  catch-all. This may mask other output rather than pass a stored value.
+
+Terminal consumers often redact a window of the output (a head/tail split, a poll tail, a
+rolling buffer) that can begin mid-line, so its first line may be the end of a value whose
+start was cut off (``cut``).
 """
 
 import hashlib
 import re
 import threading
 from dataclasses import dataclass
-from typing import Callable, Iterable, Literal
+from typing import Any, Callable, Iterable, Literal, Mapping
 
 Mask = Callable[[str], str]
 # Is this INI option name a secret? Supplied by agent/redact.py so this pass applies the same
@@ -41,11 +48,33 @@ Span = tuple[int, int, str]  # (start, end, replacement) in the original text
 Lines = list[tuple[int, int]]  # (start, end) of each line body in the original text
 
 
+Signature = tuple[int, int, int, int]  # utils.file_signature
+
+
+@dataclass(frozen=True)
+class LocalExecution:
+    """What a local executor attests for one command, recorded before it ran: the HOME its
+    shell expands ``~`` / ``$HOME`` against, and the file signature of each credential store
+    the command names (keyed by resolved path). A store whose signature has changed since is
+    not the version that produced the output."""
+
+    home: str | None
+    signatures: Mapping[str, Signature]
+
+    def to_json(self) -> dict[str, Any]:
+        return {"home": self.home, "signatures": {k: list(v) for k, v in self.signatures.items()}}
+
+    @classmethod
+    def from_json(cls, data: Any) -> "LocalExecution | None":
+        if not isinstance(data, dict):
+            return None
+        return cls(data.get("home"), {k: tuple(v) for k, v in (data.get("signatures") or {}).items()})
+
+
 @dataclass(frozen=True)
 class StoreSnapshot:
-    """Bounded store content with its filesystem origin and completeness."""
+    """Bounded store content of the attested version, and whether it is the whole file."""
 
-    backend: str
     content: str
     complete: bool
 
@@ -57,7 +86,6 @@ class StoreSource:
     fmt: str
     # Trailing path parts that name the store in a grep prefix: (".netrc",), (".aws", "config").
     name: tuple[str, ...]
-    backend: str | None = None
     snapshot: StoreSnapshot | None = None
 
 
@@ -242,7 +270,7 @@ def _ini_spans(text: str, mask: Mask, secret_key: SecretKey, delimiters: str,
             continue
         indent = len(body) - len(body.lstrip(" \t"))
         lead = start + indent
-        if indent > cur_indent and cur_indent >= 0:
+        if indent > cur_indent >= 0:
             if in_secret:
                 spans.append((lead, lead + len(stripped), mask(stripped)))
             continue
@@ -328,7 +356,7 @@ def _stored_values(store: StoreSource, secret_key: SecretKey) -> set[str] | None
     so the next call learns the new values and forgets the old ones.
     """
     snapshot = store.snapshot
-    if snapshot is None or not snapshot.complete or snapshot.backend != store.backend:
+    if snapshot is None or not snapshot.complete:
         return None
     content = snapshot.content
     cache_key = _learned_cache_key(store.fmt, secret_key, content) if content else None
@@ -383,7 +411,7 @@ def _line_owner(text: str, start: int, end: int, stores: list[StoreSource]) -> t
     return (None, m.end()) if _PATH_LIKE_RE.search(m.group("path")) else None
 
 
-def _mixed_spans(text: str, stores: list[StoreSource], mask: Mask, secret_key: SecretKey) -> list[Span]:
+def _mixed_spans(text: str, stores: list[StoreSource], mask: Mask, secret_key: SecretKey, cut: bool) -> list[Span]:
     lines = _line_spans(text)
     owners = [_line_owner(text, a, b, stores) for a, b in lines]
     # Grep prefixes are only trusted once a line names a store: then the output is grep-shaped
@@ -406,29 +434,46 @@ def _mixed_spans(text: str, stores: list[StoreSource], mask: Mask, secret_key: S
     for values in learned.values():
         spans += _value_spans(text, values, mask)
     unowned_text = "\n".join(text[a:b] for a, b in unowned)
-    # A matching value cannot establish source identity or completeness; _stored_values
-    # requires both before consulting its content cache. Even a verified snapshot can go
-    # stale after the command runs, so inconsistent output still selects the catch-all.
+    # A matching value cannot establish source identity or completeness; the snapshot only
+    # exists for the attested store version, and _stored_values requires it to be complete.
+    # Output that shows none of its values was read from somewhere else: catch-all.
     blind = any(k not in learned or (learned[k] and not any(v in unowned_text for v in learned[k]))
                 for k in range(len(stores)))
+    # A cut first line still shows which values were printed, but no grammar can parse it.
+    unowned = [line for line in unowned if not (cut and line == lines[0])]
     if unowned and unowned_text.strip() and blind:
         for fmt in sorted({s.fmt for s in stores}):
             spans += _format_spans(text, fmt, mask, secret_key, False, unowned)
     return spans
 
 
+def _first_line_span(text: str, mask: Mask) -> list[Span]:
+    body = text.split("\n", 1)[0]
+    stripped = body.strip(" \t\r")
+    if not stripped:
+        return []
+    start = body.index(stripped)
+    return [(start, start + len(stripped), mask(stripped))]
+
+
 def mask_credential_stores(text: str, stores: Iterable[StoreSource], mask: Mask, secret_key: SecretKey,
-                           extent: Extent = "slice") -> str:
+                           extent: Extent = "slice", cut: bool = False) -> str:
     """Mask every credential value ``text`` holds from ``stores`` (built by
     ``agent.redact._credential_store_source``). URL userinfo passwords are masked for every
-    format — a ``.pypirc`` ``repository`` URL can carry one as well as ``.git-credentials``."""
+    format — a ``.pypirc`` ``repository`` URL can carry one as well as ``.git-credentials``.
+    ``cut``: the text may begin mid-line, so its first line is masked whole (no grammar can
+    tell the end of a value from public text without the value's start) and the grammars start
+    on the next line, as a slice."""
     stores = list(stores)
     spans = _url_userinfo_spans(text, mask)
+    if cut:
+        spans += _first_line_span(text, mask)
     if extent == "mixed":
-        spans += _mixed_spans(text, stores, mask, secret_key)
+        spans += _mixed_spans(text, stores, mask, secret_key, cut)
     else:
+        lines = _line_spans(text)[1 if cut else 0:]
         for fmt in sorted({s.fmt for s in stores}):
-            spans += _format_spans(text, fmt, mask, secret_key, extent == "start")
+            spans += _format_spans(text, fmt, mask, secret_key, extent == "start", lines)
     if not spans:
         return text
     merged: list[list] = []
