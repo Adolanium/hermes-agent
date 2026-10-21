@@ -588,6 +588,32 @@ def direct_api_alias_base_url(alias: str) -> str:
             or get_secret_str("OPENAI_BASE_URL", "").strip().rstrip("/") or _DIRECT_API_BASE_URLS[alias])
 
 
+def openai_alias_model_endpoint_key(base_url: str) -> Optional[str]:
+    """``model.key_env`` when ``base_url`` is the ``model.base_url`` of ``model.provider: openai``, else None.
+
+    "" means key_env is empty or unset. Callers must not substitute ``OPENAI_API_KEY`` then: that key was
+    issued for ``OPENAI_BASE_URL`` or api.openai.com, not for this host. None means another endpoint, and
+    the caller keeps its own key.
+    """
+    model_cfg = _rp()._get_model_config() or {}
+    cfg_base_url = _clean(model_cfg.get("base_url")).rstrip("/")
+    if _clean(model_cfg.get("provider")).lower() != "openai" or not cfg_base_url:
+        return None
+    return _model_cfg_key_env_for(model_cfg, base_url) if cfg_base_url == _clean(base_url).rstrip("/") else None
+
+
+def expand_direct_api_alias_keyed(provider: Optional[str], base_url: Optional[str],
+                                  api_key: Optional[str]) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    """:func:`expand_direct_api_alias` for a config block, plus the key for the endpoint it lands on.
+
+    A block that names no base_url and lands on ``model.base_url`` takes ``model.key_env``, or no key:
+    its own api_key was for the OpenAI host, not for that endpoint.
+    """
+    provider_out, base_out = expand_direct_api_alias(provider, base_url)
+    model_key = None if _clean(base_url) else openai_alias_model_endpoint_key(base_out or "")
+    return provider_out, base_out, api_key if model_key is None else (model_key or None)
+
+
 def _resolve_direct_alias_runtime(requested_provider: str, explicit_api_key: Optional[str],
                                   explicit_base_url: str) -> dict[str, Any]:
     """Bare ``custom`` + explicit base_url (e.g. a ``model_aliases:`` direct alias)."""
