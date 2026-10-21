@@ -499,6 +499,7 @@ def test_same_context_tasks_each_get_their_own_turn(tmp_path, monkeypatch):
     fold two of them into one turn (one answered with the other's reply, the other stuck)."""
     import asyncio
     import socket
+    import threading
 
     from gateway.config import PlatformConfig
     import agent.oneshot_footprint as footprint
@@ -511,10 +512,12 @@ def test_same_context_tasks_each_get_their_own_turn(tmp_path, monkeypatch):
     monkeypatch.setenv("A2A_PORT", str(port))
     monkeypatch.setattr(footprint, "is_single_query_session", lambda: False)
     a = A2AAdapter(PlatformConfig(enabled=True, extra={"port": port}))
+    submitted = threading.Event()
 
     async def model(event):
         job = event.text.strip().rsplit("\n", 1)[-1]
-        await asyncio.sleep(1.0 if job == "job-0" else 0.2)  # later tasks arrive while job-0 runs
+        if job == "job-0":  # later tasks arrive while job-0 runs
+            assert await asyncio.to_thread(submitted.wait, 10)
         return "REPLY " + job
     a._message_handler = model
 
@@ -524,6 +527,7 @@ def test_same_context_tasks_each_get_their_own_turn(tmp_path, monkeypatch):
             tids.append(_rpc(port, "SendMessage", {
                 "message": {"messageId": f"m-{i}", "role": "ROLE_USER", "contextId": "ctx", "parts": [{"text": f"job-{i}"}]},
                 "configuration": {"returnImmediately": True}})["task"]["id"])
+        submitted.set()
         deadline = time.time() + 15
         while True:
             tasks = [_rpc(port, "GetTask", {"id": t}) for t in tids]

@@ -5,6 +5,7 @@ capabilities}}``. Stdlib urllib; wire format is A2A v1.0 ``SendMessage`` (v0.3 r
 from __future__ import annotations
 
 import contextlib
+import http.client
 import json
 import logging
 import threading
@@ -100,7 +101,7 @@ def _fetch_card_cached(base_url: str, headers: dict, timeout: int) -> Optional[d
         fetched = _fetch_card(base_url, headers, timeout)
         if isinstance(fetched, dict):
             card = fetched
-    except Exception:
+    except _PEER_IO_ERRORS:
         card = None
     with _card_cache_lock:
         _card_cache[key] = (now, card)
@@ -199,7 +200,7 @@ def a2a_get_task(args: dict, **_: Any) -> str:
         resp = _http_post_json(_rpc_url(base_url, card), rpc_body, headers, timeout)
     except urllib.error.HTTPError as e:
         return _peer_http_error(agent, e)
-    except Exception as e:
+    except _PEER_IO_ERRORS as e:
         return f"Error: GetTask on '{agent}' failed. {e}"
 
     if "error" in resp:
@@ -312,6 +313,8 @@ def _reply_text_from_result(result: Any) -> str:
     return protocol.extract_text((result.get("status", {}) or {}).get("message") or result)
 
 
+# What a peer round trip raises: network and HTTP failures, or a body that is not JSON.
+_PEER_IO_ERRORS = (OSError, ValueError, http.client.HTTPException)
 _AUTH_ERR = "Error: peer '{agent}' rejected auth (HTTP {code}). Check the configured token."
 _HTTP_CALL_ERRORS = {401: _AUTH_ERR, 403: _AUTH_ERR, 429: "Error: peer '{agent}' rate limited us (HTTP 429). Retry later."}
 

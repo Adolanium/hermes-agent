@@ -547,7 +547,7 @@ class A2AAdapter(BasePlatformAdapter):
     def _dispatch_queued(self, task_id: str, event: MessageEvent) -> None:
         try:
             asyncio.run_coroutine_threadsafe(self.handle_message(event), self._loop)
-        except Exception as e:
+        except RuntimeError as e:  # the gateway loop is closed
             # Its waiter finalizes the failure and pops it, which hands the context on.
             self._resolve_task(task_id, protocol.STATE_FAILED, security.redact_outbound(f"Dispatch failed: {e}"))
 
@@ -758,32 +758,20 @@ class A2AAdapter(BasePlatformAdapter):
 
         def _run() -> None:
             try:
-                try:
-                    if "forward" in pending:
-                        *args, input_id = pending["forward"]
-                        reply, state = self._forward_to_profile(*args, input_id=input_id)
-                    else:
-                        state, reply = pending["future"].result(timeout=_BACKGROUND_WAIT_SECONDS)
-                except FuturesTimeout:
-                    logger.warning(
-                        "A2A: background waiter for task %s hit the %ss ceiling",
-                        pending.get("task_id"),
-                        _BACKGROUND_WAIT_SECONDS,
-                    )
-                    state, reply = (
-                        protocol.STATE_FAILED,
-                        "[agent did not reply in time]",
-                    )
-                except Exception:
-                    state, reply = protocol.STATE_FAILED, "[agent did not reply]"
-                self._finalize_task(pending, state, reply)
+                if "forward" in pending:
+                    *args, input_id = pending["forward"]
+                    reply, state = self._forward_to_profile(*args, input_id=input_id)
+                else:
+                    state, reply = pending["future"].result(timeout=_BACKGROUND_WAIT_SECONDS)
+            except FuturesTimeout:
+                logger.warning("A2A: background waiter for task %s hit the %ss ceiling",
+                               pending.get("task_id"), _BACKGROUND_WAIT_SECONDS)
+                state, reply = protocol.STATE_FAILED, "[agent did not reply in time]"
             except Exception:
-                logger.debug("A2A: background waiter failed", exc_info=True)
-                try:
-                    self._finalize_task(
-                        pending, protocol.STATE_FAILED, "[agent did not reply]")
-                except Exception:
-                    pass
+                # Boundary: no caller is left to raise to, so the task records the failure.
+                logger.warning("A2A: background waiter for task %s failed", pending.get("task_id"), exc_info=True)
+                state, reply = protocol.STATE_FAILED, "[agent did not reply]"
+            self._finalize_task(pending, state, reply)
 
         threading.Thread(
             target=copy_context().run,
