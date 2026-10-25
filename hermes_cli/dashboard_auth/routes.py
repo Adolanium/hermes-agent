@@ -608,7 +608,8 @@ async def auth_native_refresh(request: Request, body: _NativeRefreshBody):
     """Rotate a desktop-held refresh token (mirrors the gate's ``_attempt_refresh``): every
     provider rejecting the RT -> 401 ``session_expired`` (desktop re-logs); none rotated and one
     unreachable -> 503. On the gateway's Webapp behind the gate it renews only refresh tokens
-    this listener gave a native app's sign-in (``webapp_sign_in.token_works_alone``)."""
+    this listener gave a native app's sign-in (``webapp_sign_in.token_works_alone``), and a
+    sign-out before the provider answers -> 401 ``session_expired`` too."""
     if not body.refresh_token:
         raise _http(400, "refresh_token required")
     if not webapp_sign_in.token_works_alone(request, body.refresh_token):
@@ -626,11 +627,14 @@ async def auth_native_refresh(request: Request, body: _NativeRefreshBody):
         raise _http(503, f"Auth provider {str(e)!r} unreachable")
     if refreshed is not None:
         session = refreshed[0]
-        webapp_sign_in.gave_native_app(request, session)
-        _audit(request, AuditEvent.REFRESH_SUCCESS, provider=session.provider,
-               user_id=session.user_id)
-        return _bearer_payload(session)
-    _audit(request, AuditEvent.REFRESH_FAILURE, reason="all_providers_rejected_rt")
+        # A sign-out while the provider ran dropped the refresh token: the renewed pair goes to no one.
+        if webapp_sign_in.gave_native_app(request, session, renewing=body.refresh_token):
+            _audit(request, AuditEvent.REFRESH_SUCCESS, provider=session.provider,
+                   user_id=session.user_id)
+            return _bearer_payload(session)
+        _audit(request, AuditEvent.REFRESH_FAILURE, reason="signed_out")
+    else:
+        _audit(request, AuditEvent.REFRESH_FAILURE, reason="all_providers_rejected_rt")
     return JSONResponse(
         {"error": "session_expired",
          "detail": "Refresh token expired or invalid; start a new sign-in."}, status_code=401)

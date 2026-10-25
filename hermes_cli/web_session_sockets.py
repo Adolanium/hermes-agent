@@ -10,12 +10,14 @@ replaced, nor behind the sign-in gate.
 
 Behind the sign-in gate the Webapp's browsers sign in instead, and each login is bound to the browser
 credential (``hermes_cli.webapp_sign_in``): a ticket such a login mints records the credential's
-generation as ``sign_in`` and likewise opens nothing once it is replaced.
+generation as ``sign_in`` and likewise opens nothing once it is replaced. So does a native app's
+sign-in on the Webapp: its requests are checked under the credential in use, and the socket its token
+opens as ``?token=`` is tracked under it too.
 
 Every socket the browser credential admits, directly or through such a ticket, is tracked here under
 that generation until it ends; ``close_all``, which ``browser_credential.rotate`` runs when ``hermes
 webapp --sign-out`` replaces the credential, closes them all at once. Sockets admitted on any other
-credential (a native client's grant or sign-in, a dashboard login off the Webapp) are never tracked.
+credential (a native client's gateway grant, a dashboard login off the Webapp) are never tracked.
 """
 from __future__ import annotations
 
@@ -116,13 +118,13 @@ def _close_on(ws, loop: asyncio.AbstractEventLoop) -> bool:
 
 def close_all() -> int:
     """Close every live socket the browser credential admitted, directly, through a ticket or through
-    a login bound to it, each on its own event loop. Safe from any thread; returns how many were
+    a sign-in bound to it, each on its own event loop. Safe from any thread; returns how many were
     asked to close."""
     with _lock:
         live = list(_live.values())
         _live.clear()
     closing = sum(_close_on(ws, loop) for ref, loop, _digest in live if (ws := ref()) is not None)
-    _log.info("Closing %d browser sockets opened with the replaced browser credential", closing)
+    _log.info("Closing %d sockets opened under the replaced browser credential", closing)
     return closing
 
 

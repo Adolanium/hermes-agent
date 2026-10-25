@@ -222,7 +222,8 @@ def _ws_auth_reason(ws: WebSocket, *, allow_internal: bool = False,
     providers — the same ``verify_session`` seam the native bearer REST leg
     uses — e.g. a token-mode Remote desktop connection; on the gateway's Webapp
     only a token that listener gave a native app's sign-in, as for the bearer
-    header, ``webapp_sign_in.token_works_alone``). The legacy in-process
+    header, ``webapp_sign_in.token_works_alone``, and the socket is tracked so
+    signing out closes it). The legacy in-process
     ``_SESSION_TOKEN`` is rejected in gated mode: a leaked ``_SESSION_TOKEN``
     must not grant access.
 
@@ -306,7 +307,8 @@ def _ws_auth_reason(ws: WebSocket, *, allow_internal: bool = False,
         # and a provider-verified token is accepted on identity merit. On the
         # gateway's Webapp it follows the bearer header's rule: only a token this
         # listener gave a native app's sign-in works on its own, so a browser
-        # login's tokens work only as its cookies, which sign-out ends.
+        # login's tokens work only as its cookies, which sign-out ends; and the
+        # socket such a token opens is tracked like a login's, so sign-out closes it.
         token = ws.query_params.get("token", "")
         if token:
             from hermes_cli import webapp_sign_in
@@ -326,6 +328,8 @@ def _ws_auth_reason(ws: WebSocket, *, allow_internal: bool = False,
                 _reject(f"session token verify unavailable: {exc}")
                 return "token_unavailable", "token"
             if session is not None:
+                if (signed_in := webapp_sign_in.sign_in_of(view)) is not None:
+                    track(ws, signed_in)
                 _stamp_identity({
                     "user_id": getattr(session, "user_id", None),
                     "provider": getattr(session, "provider", None),

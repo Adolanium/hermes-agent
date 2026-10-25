@@ -109,6 +109,7 @@ def test_signing_out_of_a_gateway_not_serving_the_webapp_replaces_the_stored_cre
     raw = json.dumps({"protocol": 1, "verb": "webapp-sign-out", "id": 1, "params": {}}).encode()
     answer = json.loads(runner.session_control_server.handle_request_line(raw, "same-user"))
     assert answer["ok"], answer
-    assert answer["result"] == {"signed_out": True, "serving": False, "sign_in_gate": False, "connections_closed": 0}
+    assert answer["result"] == {"signed_out": True, "serving": False, "sign_in_gate": False, "connections_closed": 0,
+                                "native_apps_signed_out": True}
     assert webapp.browser_session_token(tmp_path) != before
     assert not record.exists()

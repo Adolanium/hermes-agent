@@ -61,7 +61,9 @@ The server issues `session:operator` only at these existing trusted boundaries:
   such a login keeps in its cookies never work there on their own: the Webapp's listener accepts a
   bearer token or a socket's `?token=`, and renews a refresh token, only when it gave that token to a
   native app's RFC 8252 sign-in (digests kept in `webapp/native-sign-in-tokens.json` in the gateway home until they
-  expire or sign-out drops them). A restart that does not sign out still accepts those tokens.
+  expire). A restart keeps that record. Sign-out drops it, then replaces the session token; each request
+  such a token made was checked under the session token in use, so the sockets it opened and the tickets
+  it minted end with the logins'.
 - The HTTP mutation gate, after a verified dashboard Session, native HTTP owner grant,
   or permitted legacy session token has been accepted.
 

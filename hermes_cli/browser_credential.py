@@ -5,12 +5,13 @@ loopback Webapp tab holds it; behind the sign-in gate each Webapp login is bound
 (``hermes_cli.webapp_sign_in``). The gateway keeps the Webapp's credential in its home
 (``gateway.webapp_listener.browser_session_token``) and sets it when its listener starts.
 
-Every grant a browser gets under the credential records the credential's generation, a SHA-256 digest
+Every grant made under the credential records the credential's generation, a SHA-256 digest
 of it, when the grant is made, and is honoured only while :func:`is_current` says that generation is
 still the one in use: window and launch tickets (``web_routers.webapp``), socket tickets
 (``web_session_sockets.ticket_refusal``), Bot Desktop viewer tickets (``web_routers.display``), file
-tickets (``web_server_file_tickets``), open sockets (``web_session_sockets.track``) and a cookie
-login's binding (``webapp_sign_in.check``). Stores keep the generation, never the credential.
+tickets (``web_server_file_tickets``), open sockets (``web_session_sockets.track``), a cookie
+login's binding (``webapp_sign_in.check``) and each request of a native app's sign-in on the Webapp
+(``webapp_sign_in.token_works_alone``). Stores keep the generation, never the credential.
 
 :func:`rotate` (``hermes webapp --sign-out``) replaces the credential, then runs every revoker
 registered with :func:`on_rotate`: grants that stay in use without being presented again (open

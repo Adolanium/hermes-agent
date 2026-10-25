@@ -23,10 +23,16 @@ token (the bundled password provider decodes base64 leniently, so the quoted coo
 So on the gateway's Webapp behind the gate a provider token works on its own only when this listener
 gave it to a native app's sign-in (RFC 8252: ``/auth/native/token``, then ``/auth/native/refresh``). The
 listener keeps a digest of each such token until it expires, in ``RECORD_PATH`` under the gateway home
-(``app.state.webapp_home``), so a restart that does not sign out still accepts them. Sign-out drops
-that record (:func:`revoke`, run by ``browser_credential.rotate`` and by the stored-credential
-replacement when nothing is serving), so those tokens no longer work on their own. A browser login's
+(``app.state.webapp_home``), so a restart that does not sign out still accepts them. A browser login's
 tokens therefore work only as that login's cookies and end with it.
+
+A native app's sign-in on the Webapp signs out with the browsers. A request whose token passes
+:func:`token_works_alone` records the browser credential's generation as a login's does, so the
+tickets it mints and the sockets it opens end at sign-out the same way. Sign-out first drops the record
+(:func:`revoke`), then replaces the credential: a token checked before the drop was checked under the
+credential being replaced, and one checked after it no longer works alone, in this process or after a
+restart. Nothing is revoked at the provider (the bundled password provider cannot revoke its tokens);
+sign-out ends them on this listener.
 """
 from __future__ import annotations
 
@@ -84,8 +90,9 @@ def check(request: Request) -> bool:
 
 
 def sign_in_of(request: Request) -> Optional[str]:
-    """The browser credential generation *request*'s login was checked against, or None off the
-    Webapp's gate (the socket tickets it mints then carry no binding)."""
+    """The browser credential generation *request*'s login, or the native app token it presented
+    alone, was checked against; None off the Webapp's gate (the socket tickets it mints then carry no
+    binding)."""
     return getattr(request.state, "webapp_sign_in", None)
 
 
@@ -115,25 +122,38 @@ def token_works_alone(request: Request, token: str) -> bool:
     """Whether provider token *token* may be used on its own (a bearer header, a socket's
     ``?token=``, the refresh route) on *request*'s listener: anywhere but the gateway's Webapp behind
     the gate, as on main; there, only when this listener gave it to a native app's sign-in and it has
-    not expired."""
+    not expired. When it works there, records the generation of the browser credential in use on
+    ``request.state.webapp_sign_in``, as :func:`check` does for a login, so the tickets the request
+    mints and the socket it opens end at sign-out."""
     if not applies(request):
         return True
+    # Read before the record: sign-out drops the record before it replaces the credential, so a token
+    # still found there was found under the credential that sign-out replaces, and what it grants ends.
+    generation = browser_credential.generation()
     with _records_lock:
-        expires = _loaded(_home(request)).get(_digest(token))
-    return expires is not None and expires > time.time()
+        works = _recorded(_loaded(_home(request)), token, time.time())
+    if works:
+        request.state.webapp_sign_in = generation
+    return works
 
 
-def gave_native_app(request: Request, session) -> None:
+def gave_native_app(request: Request, session, *, renewing: Optional[str] = None) -> bool:
     """Record that this listener just gave *session*'s tokens to a native app's sign-in, so they work
-    on their own on the gateway's Webapp behind the gate (:func:`token_works_alone`)."""
+    on their own on the gateway's Webapp behind the gate (:func:`token_works_alone`).
+
+    For a renewal, *renewing* is the refresh token renewed. When sign-out dropped it while the
+    provider ran, nothing is recorded and this returns False: the caller hands the pair out to no
+    one, as the gate renews a login's binding only while its credential is in use (:func:`renew`)."""
     if not applies(request):
-        return
+        return True
     now = int(time.time())
     given = ((session.access_token, int(session.expires_at or 0) or now + REFRESH_TOKEN_LIFETIME),
              (session.refresh_token, now + REFRESH_TOKEN_LIFETIME))
     home = _home(request)
     with _records_lock:
         records = _loaded(home)
+        if renewing is not None and not _recorded(records, renewing, now):
+            return False
         for token, expires in given:
             if token:
                 records[_digest(token)] = expires
@@ -141,6 +161,30 @@ def gave_native_app(request: Request, session) -> None:
             del records[key]
         if home is not None:
             _write(home / RECORD_PATH, records)
+    return True
+
+
+def revoke(home: Path) -> None:
+    """Drop the native sign-ins recorded for gateway home *home*: the tokens this listener gave native
+    apps no longer work on their own, in this process or after a restart. Sign-out runs it before it
+    replaces the browser credential (module docstring). Raises OSError, having dropped nothing, when
+    the record is there but cannot be removed: a sign-out that leaves it would be undone by a restart."""
+    home = Path(home)
+    path = home / RECORD_PATH
+    with _records_lock:
+        try:
+            path.unlink()
+        except (FileNotFoundError, NotADirectoryError):  # nothing recorded there
+            pass
+        except OSError as exc:
+            raise OSError(f"could not remove {path}, the Webapp's record of native sign-ins "
+                          f"({exc.strerror or exc})") from exc
+        _records[home] = {}
+
+
+def _recorded(records: dict[str, int], token: str, now: float) -> bool:
+    expires = records.get(_digest(token))
+    return expires is not None and expires > now
 
 
 def _digest(token: str) -> str:
@@ -195,47 +239,7 @@ def _write(path: Path, records: dict[str, int]) -> None:
         _log.warning("Could not save the Webapp's record of native sign-ins: %s", exc)
 
 
-def revoke(home: Optional[Path] = None) -> int:
-    """Drop native sign-ins recorded for *home* so those tokens no longer work on their own.
-
-    Sign-out runs this. With no *home*, that is the Webapp this process is serving. A restart
-    that does not sign out leaves the file in place, and the next start of this listener still
-    accepts the tokens it gave out. Returns how many recorded tokens it dropped.
-    """
-    if home is None:
-        home = _serving_home()
-    else:
-        home = Path(home)
-    with _records_lock:
-        records = _loaded(home)
-        dropped = len(records)
-        records.clear()
-        if home is not None:
-            _drop_file(home / RECORD_PATH)
-    return dropped
-
-
-def _serving_home() -> Optional[Path]:
-    from hermes_cli.web_server import app
-
-    raw = getattr(app.state, "webapp_home", None)
-    return None if raw is None else Path(raw)
-
-
-def _drop_file(path: Path) -> None:
-    try:
-        path.unlink()
-    except FileNotFoundError:
-        return
-    except OSError as exc:  # memory is already clear; an empty file beats a record a restart would honour
-        _log.warning("Could not drop the Webapp's record of native sign-ins: %s", exc)
-        _write(path, {})
-
-
 def _reset_for_tests() -> None:
     """Forget every loaded record, as a new process starts with only the files."""
     with _records_lock:
         _records.clear()
-
-
-browser_credential.on_rotate("native sign-ins", revoke)

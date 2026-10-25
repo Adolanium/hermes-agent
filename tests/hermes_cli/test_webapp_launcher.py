@@ -262,24 +262,40 @@ def test_sign_out_replaces_the_browser_credential_on_the_running_gateway(world, 
     assert "Signed out of every Webapp tab" in out and "closed 3 browser connections" in out
 
 
-def test_sign_out_behind_the_sign_in_gate_says_browsers_must_sign_in_again(world, capsys):
-    """It says exactly what ended: every browser login and the account tokens it held, which work on
-    the Webapp only as that login, and native apps signed in here, whose tokens stop working alone."""
+def test_sign_out_behind_the_sign_in_gate_says_browsers_and_native_apps_must_sign_in_again(world, capsys):
+    """It says exactly what ended: every browser login and native app sign-in on the Webapp's listener,
+    the account tokens they held, and the connections they had open."""
+    world["answers"]["webapp-sign-out"]["result"] = {
+        "signed_out": True, "serving": True, "sign_in_gate": True, "connections_closed": 1,
+        "native_apps_signed_out": True}
+    assert launcher.cmd_webapp(_args(sign_out=True)) == 0
+    out = capsys.readouterr().out
+    assert "every browser and every native app" in out and "closed 1 connection." in out
+    assert "tokens" in out and "must sign in again" in out and "stay signed in" not in out
+
+
+def test_sign_out_on_a_gateway_that_predates_native_sign_out_says_native_apps_stay(world, capsys):
+    """A gateway started before sign-out covered native apps answers without native_apps_signed_out:
+    the browsers are signed out, the native apps are not, and a restart fixes that."""
     world["answers"]["webapp-sign-out"]["result"] = {
         "signed_out": True, "serving": True, "sign_in_gate": True, "connections_closed": 1}
     assert launcher.cmd_webapp(_args(sign_out=True)) == 0
     out = capsys.readouterr().out
-    assert "closed 1 browser connection." in out and "must sign in again" in out
-    assert "tokens" in out and "Native apps" in out and "signed out" in out
-    assert "stay signed in" not in out
+    assert "closed 1 browser connection." in out and "browsers must sign in again" in out
+    assert "Native apps that signed in on the Webapp's listener stay signed in" in out
+    assert launcher.RESTART_COMMAND in out
 
 
-def test_sign_out_on_a_gateway_not_serving_the_webapp_says_no_browser_was_connected(world, capsys):
+@pytest.mark.parametrize("native", [True, False])
+def test_sign_out_on_a_gateway_not_serving_the_webapp_says_no_browser_was_connected(world, capsys, native):
     world["answers"]["webapp-sign-out"]["result"] = {
-        "signed_out": True, "serving": False, "sign_in_gate": False, "connections_closed": 0}
+        "signed_out": True, "serving": False, "sign_in_gate": False, "connections_closed": 0,
+        **({"native_apps_signed_out": True} if native else {})}
     assert launcher.cmd_webapp(_args(sign_out=True)) == 0
     out = capsys.readouterr().out
     assert "not serving the Webapp" in out and "Signed out of every" not in out
+    assert ("dropped the native app sign-ins" in out) is native
+    assert ("stay signed in" in out) is not native
 
 
 def test_sign_out_on_a_gateway_that_does_not_report_what_it_closed_asks_for_a_restart(world, capsys):
@@ -322,6 +338,21 @@ def test_signing_out_with_no_gateway_running_still_replaces_the_stored_credentia
     assert not record.exists()
     out = capsys.readouterr().out
     assert "No gateway is running" in out and "sign in again" in out and "native app" in out
+
+
+def test_signing_out_with_no_gateway_and_a_record_that_cannot_be_removed_says_nobody_was(world, capsys):
+    """A record of native sign-ins left in place would let the next start accept those tokens again:
+    when it cannot be removed, the stored credential is kept too, and it says nobody was signed out
+    and names the file."""
+    from gateway.webapp_listener import TOKEN_PATH, browser_session_token
+    from hermes_cli.webapp_sign_in import RECORD_PATH
+    before = browser_session_token(world["root"])
+    (world["root"] / RECORD_PATH).mkdir()  # a folder where the record goes: it cannot be unlinked
+    world["answers"]["webapp-sign-out"] = launcher.GatewayUnreachable("no gateway")
+    assert launcher.cmd_webapp(_args(sign_out=True)) == 1
+    out = capsys.readouterr().out
+    assert "Nobody was signed out" in out and str(world["root"] / RECORD_PATH) in out
+    assert (world["root"] / TOKEN_PATH).read_text().strip() == before
 
 
 def test_signing_out_with_no_gateway_and_a_credential_that_cannot_be_stored_says_nobody_was(world, capsys):

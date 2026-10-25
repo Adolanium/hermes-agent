@@ -7,10 +7,11 @@ the login's requests get 401 and the sign-in view, the sockets and host terminal
 4401, tickets it minted open nothing, and its cookies replayed from anywhere get nothing. The provider
 tokens those cookies hold work only as those cookies: the Webapp's listener refuses them as a bearer
 token, on the refresh route and as a socket's ``?token=``, before and after sign-out and across a
-restart. Signing in again works. A native app's own sign-in on the same listener works on its own
-until sign-out drops the listener's record of it, including after a restart; a restart that does
-not sign out still accepts it. The standalone dashboard has no
-browser credential and keeps its logins as on main.
+restart. Signing in again works. A native app's own sign-in on the same listener (RFC 8252) works on
+its own and survives a restart that does not sign out; sign-out ends it as it ends a login: its tokens
+stop working on their own, after a restart too, a renewal sign-out overtakes hands out nothing, and the
+sockets it opened close. The standalone dashboard has no browser credential and keeps its logins as on
+main.
 """
 import json
 from types import SimpleNamespace
@@ -276,7 +277,7 @@ def test_the_webapp_leaves_cookies_named_for_no_gateway_to_the_dashboard(gated, 
 # A browser's login keeps the sign-in provider's access and refresh token in its cookies. Copied out of
 # them they are the kind of token a native app presents as ``Authorization: Bearer`` and renews on
 # ``/auth/native/refresh``. On the Webapp's listener they work only as that login's cookies, so signing
-# out ends them everywhere there. A native app's own sign-in works on its own until sign-out drops it.
+# out ends them everywhere there. A native app's own sign-in works on its own until sign-out ends it.
 
 @pytest.fixture
 def clock(monkeypatch):
@@ -433,10 +434,10 @@ def _native_app_sign_in(gated):
 
 
 def test_sign_out_stops_a_native_apps_tokens_working_alone(gated, sign_out, monkeypatch):
-    """``hermes webapp --sign-out`` rotates the browser credential, which drops the tokens this
-    listener gave a native app. Those tokens then work nowhere on their own, including after a
-    restart. A browser login's tokens stay refused on their own, a bearer never given to a native
-    app still does not work alone, and a native app can sign in again."""
+    """``hermes webapp --sign-out`` drops the listener's record of the tokens it gave a native app.
+    Those tokens then work nowhere on their own, including after a restart. A browser login's tokens
+    stay refused on their own, a bearer never given to a native app still does not work alone, and a
+    native app can sign in again."""
     import time
 
     import tests.hermes_cli.conftest_dashboard_auth as stub_auth
@@ -470,6 +471,52 @@ def test_a_restart_without_sign_out_keeps_a_native_apps_tokens(gated, monkeypatc
     renewed = _renew(gated, refresh)
     assert renewed.status_code == 200
     assert gated.browser().get("/api/auth/me", headers=_bearer(renewed.json()["access_token"])).status_code == 200
+    assert _renew(gated, renewed.json()["refresh_token"]).status_code == 200
+
+
+def test_a_renewal_that_sign_out_overtakes_hands_out_nothing(gated, sign_out, monkeypatch):
+    """Sign-out lands while the provider renews a native app's refresh token: the route answers
+    ``session_expired`` and the pair the provider renewed works nowhere on its own, as the gate keeps
+    no binding for a login whose credential was replaced while its refresh ran."""
+    import time
+
+    from hermes_cli.dashboard_auth import routes
+
+    access, refresh = _native_app_sign_in(gated)
+    renew_with_provider = routes.refresh_session_coalesced
+    renewed = []
+
+    def provider_answers_after_sign_out(*args, **kwargs):
+        sign_out()
+        later = time.time() + 5  # the stub provider signs whole seconds: a distinct pair
+        monkeypatch.setattr(time, "time", lambda: later)
+        answer = renew_with_provider(*args, **kwargs)
+        renewed.append(answer[0])
+        return answer
+
+    monkeypatch.setattr(routes, "refresh_session_coalesced", provider_answers_after_sign_out)
+    _refused(_renew(gated, refresh))
+    assert renewed[0].refresh_token != refresh
+    _refused_alone(gated, renewed[0].access_token, renewed[0].refresh_token)
+    _refused_alone(gated, access, refresh)
+
+
+def test_a_native_request_while_sign_out_replaces_the_credential_is_refused(gated, sign_out, monkeypatch):
+    """Sign-out drops the native sign-ins before it replaces the credential, so a native app's request
+    that lands once the new credential is in use, before any grant made under the old one has been
+    ended, gets nothing that could outlive the sign-out under the new credential."""
+    from hermes_cli import browser_credential
+
+    access, _refresh = _native_app_sign_in(gated)
+    during = []
+
+    def a_native_request():
+        during.append(gated.browser().post("/api/auth/ws-ticket", headers=_bearer(access)))
+        return 0
+
+    monkeypatch.setattr(browser_credential, "_revokers", {"probe": a_native_request, **browser_credential._revokers})
+    sign_out()
+    _refused(during[0])
 
 
 def test_replacing_the_stored_credential_without_sign_out_keeps_native_tokens(gated, monkeypatch, tmp_path):
@@ -530,12 +577,12 @@ TOKEN_SOCKETS = ("/api/ws", "/api/events?channel=tab-1", "/api/pub?channel=tab-1
                  "/api/audio/speak-stream", "/api/audio/transcribe-stream")
 
 
-def _socket_close_code(client, path, token):
-    """The code a dial of *path* presenting ``?token=`` *token* is closed with, or None while it
-    stays open."""
+def _socket_close_code(client, path, token, *, credential="token"):
+    """The code a dial of *path* presenting ``?token=`` *token* (or *credential*, such as ``ticket``)
+    is closed with, or None while it stays open."""
     joiner = "&" if "?" in path else "?"
     try:
-        with client.websocket_connect(f"ws://hermes.lan:9120{path}{joiner}token={token}") as ws:
+        with client.websocket_connect(f"ws://hermes.lan:9120{path}{joiner}{credential}={token}") as ws:
             return _close_code(ws, 0.5)
     except WebSocketDisconnect as closed:
         return closed.code
@@ -566,16 +613,34 @@ def test_a_logins_access_token_opens_none_of_the_token_sockets(gated, sign_out, 
     assert _socket_close_code(gated.browser(), path, access) == 4401
 
 
-def test_a_native_apps_token_opens_a_socket_until_sign_out(gated, sign_out):
-    """A token the listener gave a native app's sign-in opens a socket as ``?token=``. Sign-out does
-    not track that socket (a gateway grant never held the browser credential) but drops the token,
-    so it opens nothing afterwards."""
+def test_sign_out_closes_the_socket_a_native_apps_token_opened(gated, sign_out):
+    """A token the listener gave a native app's sign-in opens a socket as ``?token=``; sign-out closes
+    that socket as it closes a login's, counts it, and the token opens none afterwards."""
     access, _refresh = _native_app_sign_in(gated)
     with gated.browser().websocket_connect(f"ws://hermes.lan:9120/api/events?channel=desk&token={access}") as events:
         assert _close_code(events, 0.2) is None
-        assert sign_out()["connections_closed"] == 0
-        assert _close_code(events, 0.5) is None
+        assert sign_out()["connections_closed"] == 1
+        assert _close_code(events) == 4401
     assert _socket_close_code(gated.browser(), "/api/events?channel=desk", access) == 4401
+
+
+def test_sign_out_closes_the_sockets_a_native_apps_tickets_opened(gated, sign_out):
+    """A native app's bearer mints socket tickets as a login does: the socket one opened closes at
+    sign-out, and one minted before sign-out opens nothing after it."""
+    access, _refresh = _native_app_sign_in(gated)
+    app = gated.browser()
+
+    def ticket():
+        minted = app.post("/api/auth/ws-ticket", headers=_bearer(access))
+        assert minted.status_code == 200, minted.text
+        return minted.json()["ticket"]
+
+    with app.websocket_connect(f"ws://hermes.lan:9120/api/events?channel=desk&ticket={ticket()}") as events:
+        spare = ticket()
+        assert _close_code(events, 0.2) is None
+        sign_out()
+        assert _close_code(events) == 4401
+    assert _socket_close_code(app, "/api/events?channel=desk", spare, credential="ticket") == 4401
 
 
 @pytest.mark.platforms("posix")
