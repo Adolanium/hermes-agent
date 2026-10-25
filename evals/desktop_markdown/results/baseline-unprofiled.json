@@ -1,0 +1,349 @@
+{
+  "node": "v24.22.1",
+  "platform": "win32 10.0.26200 x64",
+  "cpu": "Intel(R) Core(TM) i7-10700K CPU @ 3.80GHz",
+  "samples": 9,
+  "warmupCalls": 30,
+  "sources": {
+    "baseline": "72a206d1dc8fe8d437dde78da42f00e70e758ef4f145bae1a9930f6164a25321"
+  },
+  "results": [
+    {
+      "function": "preprocessMarkdown",
+      "case": "short-prose",
+      "chars": 1024,
+      "inputSha256": "277d23c874399b03a6e0e0b2f5de1ea4cb54b740ed4e5dd37e4da07337d638f7",
+      "outputSha256": "277d23c874399b03a6e0e0b2f5de1ea4cb54b740ed4e5dd37e4da07337d638f7",
+      "iterations": 200,
+      "millisecondsPerCall": {
+        "baseline": [
+          0.031683499999999185,
+          0.030976499999999307,
+          0.030586499999999434,
+          0.028715500000000702,
+          0.028291500000000268,
+          0.028338000000001102,
+          0.030192500000000563,
+          0.028474999999998543,
+          0.029052499999997962
+        ]
+      }
+    },
+    {
+      "function": "preprocessMarkdown",
+      "case": "prose-16k",
+      "chars": 16384,
+      "inputSha256": "d03b1eaf11ae5b390e442dbce616dcb46674aa60a114bcd431936a64e980f938",
+      "outputSha256": "d03b1eaf11ae5b390e442dbce616dcb46674aa60a114bcd431936a64e980f938",
+      "iterations": 100,
+      "millisecondsPerCall": {
+        "baseline": [
+          0.4138670000000002,
+          0.3468640000000005,
+          0.3514080000000013,
+          0.3475630000000001,
+          0.3592419999999993,
+          0.3493289999999979,
+          0.3527320000000009,
+          0.3522119999999995,
+          0.3537139999999999
+        ]
+      }
+    },
+    {
+      "function": "preprocessMarkdown",
+      "case": "prose-64k",
+      "chars": 65536,
+      "inputSha256": "8330591f87418f06401696b43eb3e86e34a81c97217c3c159b42e1da2de04baf",
+      "outputSha256": "8330591f87418f06401696b43eb3e86e34a81c97217c3c159b42e1da2de04baf",
+      "iterations": 40,
+      "millisecondsPerCall": {
+        "baseline": [
+          1.3950974999999972,
+          1.3968475000000011,
+          1.404782499999999,
+          1.3899274999999989,
+          1.3948174999999992,
+          1.3832924999999932,
+          1.3944850000000089,
+          1.4281725000000052,
+          1.3884925000000066
+        ]
+      }
+    },
+    {
+      "function": "preprocessMarkdown",
+      "case": "markdown-16k",
+      "chars": 16384,
+      "inputSha256": "53cd98309a9138b9da7c4e59919968908a8757b15b4a37cf11a240006c28c2b6",
+      "outputSha256": "53cd98309a9138b9da7c4e59919968908a8757b15b4a37cf11a240006c28c2b6",
+      "iterations": 100,
+      "millisecondsPerCall": {
+        "baseline": [
+          0.6533719999999994,
+          0.6246140000000014,
+          0.6261899999999969,
+          0.6365049999999974,
+          0.6263240000000042,
+          0.6232009999999991,
+          0.6139310000000023,
+          0.811917999999996,
+          0.6358359999999993
+        ]
+      }
+    },
+    {
+      "function": "preprocessMarkdown",
+      "case": "code-16k",
+      "chars": 12700,
+      "inputSha256": "c01e28c8b27cf986f4301d2443943c6fca3a4f3b66e050f231844a1898ea1f59",
+      "outputSha256": "c01e28c8b27cf986f4301d2443943c6fca3a4f3b66e050f231844a1898ea1f59",
+      "iterations": 100,
+      "millisecondsPerCall": {
+        "baseline": [
+          1.146850000000004,
+          1.1671550000000024,
+          1.2158209999999963,
+          1.1959369999999945,
+          1.0536540000000059,
+          1.0452530000000024,
+          1.0372699999999986,
+          1.0446419999999943,
+          1.0358089999999993
+        ]
+      }
+    },
+    {
+      "function": "preprocessMarkdown",
+      "case": "unicode-16k",
+      "chars": 16384,
+      "inputSha256": "64657b0bfb1ccd48474ffde553ac975fbd2844eb0e6f2015f7c2f72b29673e01",
+      "outputSha256": "64657b0bfb1ccd48474ffde553ac975fbd2844eb0e6f2015f7c2f72b29673e01",
+      "iterations": 100,
+      "millisecondsPerCall": {
+        "baseline": [
+          0.44206699999999727,
+          0.4486380000000008,
+          0.43525399999999537,
+          0.4481950000000052,
+          0.4447400000000016,
+          0.44585399999999936,
+          0.4382350000000042,
+          0.4360739999999987,
+          0.44564099999999596
+        ]
+      }
+    },
+    {
+      "function": "preprocessMarkdown",
+      "case": "math-control",
+      "chars": 11000,
+      "inputSha256": "42395dba32f9ffa8f3f6e5057ed1eb5771b94905702368f9915d73ab9b3baa48",
+      "outputSha256": "3f5edba1c6a52eeaeb52e8d479bceec15594e4fce933aa774531c7dd247a626c",
+      "iterations": 60,
+      "millisecondsPerCall": {
+        "baseline": [
+          1.0755416666666557,
+          1.0920633333333323,
+          1.0682566666666693,
+          1.0676300000000083,
+          1.0738233333333331,
+          1.0844966666666702,
+          1.0749083333333298,
+          1.0882400000000112,
+          1.0772333333333335
+        ]
+      }
+    },
+    {
+      "function": "preprocessMarkdown",
+      "case": "currency-control",
+      "chars": 13000,
+      "inputSha256": "be90009b54b94a8a50f2929971cf713c2dc7a353fcc14603165d03a9cbdd3819",
+      "outputSha256": "104bb3fef2fad0d55afc78678902d310ab22274c95b82271af0ea73374721c0f",
+      "iterations": 60,
+      "millisecondsPerCall": {
+        "baseline": [
+          0.42471499999999957,
+          0.4068133333333359,
+          0.41325833333332107,
+          0.4165683333333315,
+          0.410611666666667,
+          0.40789833333333264,
+          0.41521166666667947,
+          0.42523166666666534,
+          0.4207650000000134
+        ]
+      }
+    },
+    {
+      "function": "normalizeFilePreviewMath",
+      "case": "short-prose",
+      "chars": 1024,
+      "inputSha256": "277d23c874399b03a6e0e0b2f5de1ea4cb54b740ed4e5dd37e4da07337d638f7",
+      "outputSha256": "277d23c874399b03a6e0e0b2f5de1ea4cb54b740ed4e5dd37e4da07337d638f7",
+      "iterations": 200,
+      "millisecondsPerCall": {
+        "baseline": [
+          0.01204649999999674,
+          0.01165899999999965,
+          0.012243499999999585,
+          0.01135649999999714,
+          0.011506500000000414,
+          0.01278400000000147,
+          0.011670500000000174,
+          0.01175799999999981,
+          0.011365999999998166
+        ]
+      }
+    },
+    {
+      "function": "normalizeFilePreviewMath",
+      "case": "prose-16k",
+      "chars": 16384,
+      "inputSha256": "d03b1eaf11ae5b390e442dbce616dcb46674aa60a114bcd431936a64e980f938",
+      "outputSha256": "d03b1eaf11ae5b390e442dbce616dcb46674aa60a114bcd431936a64e980f938",
+      "iterations": 100,
+      "millisecondsPerCall": {
+        "baseline": [
+          0.1580709999999999,
+          0.16244200000000092,
+          0.1583060000000023,
+          0.1572739999999976,
+          0.15837900000000446,
+          0.15829399999999624,
+          0.1595380000000023,
+          0.16026700000000346,
+          0.16581699999999727
+        ]
+      }
+    },
+    {
+      "function": "normalizeFilePreviewMath",
+      "case": "prose-64k",
+      "chars": 65536,
+      "inputSha256": "8330591f87418f06401696b43eb3e86e34a81c97217c3c159b42e1da2de04baf",
+      "outputSha256": "8330591f87418f06401696b43eb3e86e34a81c97217c3c159b42e1da2de04baf",
+      "iterations": 40,
+      "millisecondsPerCall": {
+        "baseline": [
+          0.6556524999999965,
+          0.6342875000000049,
+          0.6353350000000091,
+          0.6460350000000062,
+          0.6856824999999844,
+          0.6891624999999977,
+          0.7343200000000024,
+          0.7072549999999864,
+          0.6513650000000097
+        ]
+      }
+    },
+    {
+      "function": "normalizeFilePreviewMath",
+      "case": "markdown-16k",
+      "chars": 16384,
+      "inputSha256": "53cd98309a9138b9da7c4e59919968908a8757b15b4a37cf11a240006c28c2b6",
+      "outputSha256": "53cd98309a9138b9da7c4e59919968908a8757b15b4a37cf11a240006c28c2b6",
+      "iterations": 100,
+      "millisecondsPerCall": {
+        "baseline": [
+          0.3414930000000004,
+          0.34425600000000484,
+          0.3441150000000016,
+          0.35102899999999865,
+          0.34544899999999873,
+          0.38691800000000515,
+          0.32670600000000377,
+          0.3261799999999948,
+          0.3338800000000083
+        ]
+      }
+    },
+    {
+      "function": "normalizeFilePreviewMath",
+      "case": "code-16k",
+      "chars": 12700,
+      "inputSha256": "c01e28c8b27cf986f4301d2443943c6fca3a4f3b66e050f231844a1898ea1f59",
+      "outputSha256": "c01e28c8b27cf986f4301d2443943c6fca3a4f3b66e050f231844a1898ea1f59",
+      "iterations": 100,
+      "millisecondsPerCall": {
+        "baseline": [
+          0.358121000000001,
+          0.3529789999999957,
+          0.35323999999998706,
+          0.3559550000000127,
+          0.3463379999999961,
+          0.3532659999999851,
+          0.3461410000000069,
+          0.35217899999999647,
+          0.35048099999999976
+        ]
+      }
+    },
+    {
+      "function": "normalizeFilePreviewMath",
+      "case": "unicode-16k",
+      "chars": 16384,
+      "inputSha256": "64657b0bfb1ccd48474ffde553ac975fbd2844eb0e6f2015f7c2f72b29673e01",
+      "outputSha256": "64657b0bfb1ccd48474ffde553ac975fbd2844eb0e6f2015f7c2f72b29673e01",
+      "iterations": 100,
+      "millisecondsPerCall": {
+        "baseline": [
+          0.2157760000000053,
+          0.23300000000001092,
+          0.2208929999999964,
+          0.22164600000000065,
+          0.22601300000000266,
+          0.2186620000000039,
+          0.21765800000001037,
+          0.22268099999999322,
+          0.2178559999999925
+        ]
+      }
+    },
+    {
+      "function": "normalizeFilePreviewMath",
+      "case": "math-control",
+      "chars": 11000,
+      "inputSha256": "42395dba32f9ffa8f3f6e5057ed1eb5771b94905702368f9915d73ab9b3baa48",
+      "outputSha256": "3f5edba1c6a52eeaeb52e8d479bceec15594e4fce933aa774531c7dd247a626c",
+      "iterations": 60,
+      "millisecondsPerCall": {
+        "baseline": [
+          0.3505916666666659,
+          0.35851833333332855,
+          0.3652216666666694,
+          0.3508216666666764,
+          0.3604483333333216,
+          0.3493633333333188,
+          0.34701333333335543,
+          0.35526499999999334,
+          0.3478866666666666
+        ]
+      }
+    },
+    {
+      "function": "normalizeFilePreviewMath",
+      "case": "currency-control",
+      "chars": 13000,
+      "inputSha256": "be90009b54b94a8a50f2929971cf713c2dc7a353fcc14603165d03a9cbdd3819",
+      "outputSha256": "104bb3fef2fad0d55afc78678902d310ab22274c95b82271af0ea73374721c0f",
+      "iterations": 60,
+      "millisecondsPerCall": {
+        "baseline": [
+          0.24324166666665406,
+          0.2508950000000065,
+          0.2553533333333083,
+          0.24884666666666816,
+          0.23995333333335414,
+          0.24030999999998434,
+          0.24907166666665337,
+          0.25203666666669355,
+          0.24765333333331607
+        ]
+      }
+    }
+  ],
+  "checksum": 195218640
+}

@@ -1,0 +1,290 @@
+[
+  {
+    "function": "preprocessMarkdown",
+    "case": "short-prose",
+    "beforeMs": 0.02911100000000033,
+    "afterMs": 0.029815499999999703,
+    "reductionPercent": -2.420047404758896,
+    "perRunRatio": [
+      0.9530575831306308,
+      1.0102185191007071,
+      0.9465760551473256
+    ]
+  },
+  {
+    "function": "preprocessMarkdown",
+    "case": "prose-16k",
+    "beforeMs": 0.3519070000000011,
+    "afterMs": 0.3518380000000025,
+    "reductionPercent": 0.019607453105108252,
+    "perRunRatio": [
+      0.9995882752138904,
+      0.9989283352714473,
+      1.0004838490617167
+    ]
+  },
+  {
+    "function": "preprocessMarkdown",
+    "case": "prose-64k",
+    "beforeMs": 1.4030475000000024,
+    "afterMs": 1.404970000000003,
+    "reductionPercent": -0.1370231585174686,
+    "perRunRatio": [
+      0.9950787576755372,
+      0.9992144975194212,
+      1.0191758887637181
+    ]
+  },
+  {
+    "function": "preprocessMarkdown",
+    "case": "markdown-16k",
+    "beforeMs": 0.6196759999999994,
+    "afterMs": 0.6178399999999965,
+    "reductionPercent": 0.2962838644715915,
+    "perRunRatio": [
+      1.0052558194647134,
+      1.0040656494398186,
+      1.0038289932668107
+    ]
+  },
+  {
+    "function": "preprocessMarkdown",
+    "case": "code-16k",
+    "beforeMs": 1.048036000000002,
+    "afterMs": 1.0397359999999936,
+    "reductionPercent": 0.7919575281773117,
+    "perRunRatio": [
+      1.0253581623921857,
+      0.9939148697789831,
+      0.9987628717351397
+    ]
+  },
+  {
+    "function": "preprocessMarkdown",
+    "case": "unicode-16k",
+    "beforeMs": 0.440544000000009,
+    "afterMs": 0.4440950000000157,
+    "reductionPercent": -0.8060488850164083,
+    "perRunRatio": [
+      0.9990358614180918,
+      0.9809875743806579,
+      0.9822952105624992
+    ]
+  },
+  {
+    "function": "preprocessMarkdown",
+    "case": "math-control",
+    "beforeMs": 1.073348333333312,
+    "afterMs": 1.0723616666666507,
+    "reductionPercent": 0.09192418118331158,
+    "perRunRatio": [
+      0.9994242527700833,
+      1.0018914638562502,
+      1.0094679177638572
+    ]
+  },
+  {
+    "function": "preprocessMarkdown",
+    "case": "currency-control",
+    "beforeMs": 0.41299833333335606,
+    "afterMs": 0.40832166666668857,
+    "reductionPercent": 1.132369380021847,
+    "perRunRatio": [
+      1.0039384347742597,
+      1.0054672454874085,
+      1.0193462664956523
+    ]
+  },
+  {
+    "function": "preprocessMarkdown",
+    "case": "cjk-dollar-control",
+    "beforeMs": 0.8396066666666654,
+    "afterMs": 0.8399884999999995,
+    "reductionPercent": -0.04547764429385648,
+    "perRunRatio": [
+      0.9921901335540844,
+      0.9972906943718114,
+      0.9950173062874286
+    ]
+  },
+  {
+    "function": "preprocessMarkdown",
+    "case": "escaped-dollar-control",
+    "beforeMs": 0.6717933333333349,
+    "afterMs": 0.6728483333333618,
+    "reductionPercent": -0.15704234437579068,
+    "perRunRatio": [
+      0.9948837831279324,
+      0.9934106620727736,
+      1.0141966190711265
+    ]
+  },
+  {
+    "function": "preprocessMarkdown",
+    "case": "backslash-control",
+    "beforeMs": 0.37601833333331647,
+    "afterMs": 0.3761100000000321,
+    "reductionPercent": -0.02437824398162647,
+    "perRunRatio": [
+      0.9917444364678405,
+      0.9992248369296678,
+      1.0072526203587007
+    ]
+  },
+  {
+    "function": "normalizeFilePreviewMath",
+    "case": "short-prose",
+    "beforeMs": 0.01209450000000288,
+    "afterMs": 0.0001959999999962747,
+    "reductionPercent": 98.37942866595371,
+    "perRunRatio": [
+      59.52499999873125,
+      65.13821137713302,
+      64.5152284239793
+    ]
+  },
+  {
+    "function": "normalizeFilePreviewMath",
+    "case": "prose-16k",
+    "beforeMs": 0.1658799999999974,
+    "afterMs": 0.0012529999999969731,
+    "reductionPercent": 99.24463467567097,
+    "perRunRatio": [
+      131.65258964324875,
+      132.5555555582245,
+      132.57735247122264
+    ]
+  },
+  {
+    "function": "normalizeFilePreviewMath",
+    "case": "prose-64k",
+    "beforeMs": 0.6638750000000073,
+    "afterMs": 0.005094999999982974,
+    "reductionPercent": 99.23253624553072,
+    "perRunRatio": [
+      130.48204623874926,
+      129.98917322840512,
+      129.0344325893781
+    ]
+  },
+  {
+    "function": "normalizeFilePreviewMath",
+    "case": "markdown-16k",
+    "beforeMs": 0.3383099999999831,
+    "afterMs": 0.002333000000035099,
+    "reductionPercent": 99.3103957908323,
+    "perRunRatio": [
+      142.59100642269576,
+      145.92277992198427,
+      145.0728987978148
+    ]
+  },
+  {
+    "function": "normalizeFilePreviewMath",
+    "case": "code-16k",
+    "beforeMs": 0.3587459999999919,
+    "afterMs": 0.362586999999985,
+    "reductionPercent": -1.0706739587321268,
+    "perRunRatio": [
+      0.9900594011396714,
+      0.983054716052359,
+      1.0010259311017011
+    ]
+  },
+  {
+    "function": "normalizeFilePreviewMath",
+    "case": "unicode-16k",
+    "beforeMs": 0.22703600000000734,
+    "afterMs": 0.002504000000008091,
+    "reductionPercent": 98.89709121020101,
+    "perRunRatio": [
+      90.07259672897854,
+      91.33158107595023,
+      94.48527679573873
+    ]
+  },
+  {
+    "function": "normalizeFilePreviewMath",
+    "case": "math-control",
+    "beforeMs": 0.3612466666666781,
+    "afterMs": 0.3632766666666309,
+    "reductionPercent": -0.5619429014208421,
+    "perRunRatio": [
+      1.0097183499820135,
+      0.980545807019771,
+      1.029022819294547
+    ]
+  },
+  {
+    "function": "normalizeFilePreviewMath",
+    "case": "currency-control",
+    "beforeMs": 0.24222666666664736,
+    "afterMs": 0.24139166666664097,
+    "reductionPercent": 0.34471844553577435,
+    "perRunRatio": [
+      0.9889618323770816,
+      1.0122512658711604,
+      1.000920184311282
+    ]
+  },
+  {
+    "function": "normalizeFilePreviewMath",
+    "case": "cjk-dollar-control",
+    "beforeMs": 0.34397066666667037,
+    "afterMs": 0.3400411666666635,
+    "reductionPercent": 1.1423939250653548,
+    "perRunRatio": [
+      1.0129579691140138,
+      1.0066657028502715,
+      1.0003713731865673
+    ]
+  },
+  {
+    "function": "normalizeFilePreviewMath",
+    "case": "escaped-dollar-control",
+    "beforeMs": 0.2485100000000481,
+    "afterMs": 0.2509883333332861,
+    "reductionPercent": -0.9972771048398332,
+    "perRunRatio": [
+      0.9844673575955165,
+      0.9818456783164324,
+      0.997490915383475
+    ]
+  },
+  {
+    "function": "normalizeFilePreviewMath",
+    "case": "backslash-control",
+    "beforeMs": 0.1843516666666498,
+    "afterMs": 0.1834066666666331,
+    "reductionPercent": 0.5126072452197872,
+    "perRunRatio": [
+      0.9897989395202123,
+      1.0032834764939946,
+      1.0114597993161722
+    ]
+  },
+  {
+    "function": "preprocessMarkdown",
+    "case": "prose-512k",
+    "beforeMs": 11.778192499999978,
+    "afterMs": 11.823074999999994,
+    "reductionPercent": -0.38106441204808217,
+    "perRunRatio": [
+      0.997113063256453,
+      0.9938791975013311,
+      0.9995209540185847
+    ]
+  },
+  {
+    "function": "normalizeFilePreviewMath",
+    "case": "prose-512k",
+    "beforeMs": 5.505217500000026,
+    "afterMs": 0.04881000000000313,
+    "reductionPercent": 99.11338652832512,
+    "perRunRatio": [
+      111.82647775749128,
+      114.01888745144073,
+      112.57959434541385
+    ]
+  }
+]

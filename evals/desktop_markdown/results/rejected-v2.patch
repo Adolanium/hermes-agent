@@ -1,0 +1,15 @@
+--- a/apps/desktop/src/lib/markdown-preprocess.ts
++++ b/apps/desktop/src/lib/markdown-preprocess.ts
+@@ -767 +767 @@
+-  for (let cursor = 0; cursor < text.length; cursor += 1) {
++  for (let cursor = text.indexOf('$'); cursor !== -1; cursor = text.indexOf('$', cursor + 1)) {
+@@ -829 +829 @@
+-  for (let cursor = 0; cursor < text.length; cursor += 1) {
++  for (let cursor = text.indexOf('$'); cursor !== -1; cursor = text.indexOf('$', cursor + 1)) {
+@@ -962,0 +963,6 @@
++  // Every supported math/currency form starts with $, a backslash, or [/.
++  // Ordinary prose needs none of the line splitting or per-character scans.
++  if (!text.includes('$') && !text.includes('\\') && !text.includes('[/')) {
++    return text
++  }
++

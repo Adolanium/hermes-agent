@@ -1,0 +1,117 @@
+{
+  "rendererErrors": [],
+  "results": [
+    {
+      "scenario": "transcript",
+      "sample": 0,
+      "metrics": {
+        "transcript_mount_ms": 125.3,
+        "transcript_longtask_ms": 273,
+        "transcript_longtask_max_ms": 95
+      },
+      "detail": {
+        "turns": 200,
+        "messages": 400,
+        "longtasks": 3
+      }
+    },
+    {
+      "scenario": "transcript",
+      "sample": 1,
+      "metrics": {
+        "transcript_mount_ms": 132.5,
+        "transcript_longtask_ms": 262,
+        "transcript_longtask_max_ms": 92
+      },
+      "detail": {
+        "turns": 200,
+        "messages": 400,
+        "longtasks": 3
+      }
+    },
+    {
+      "scenario": "transcript",
+      "sample": 2,
+      "metrics": {
+        "transcript_mount_ms": 108.3,
+        "transcript_longtask_ms": 235,
+        "transcript_longtask_max_ms": 83
+      },
+      "detail": {
+        "turns": 200,
+        "messages": 400,
+        "longtasks": 3
+      }
+    },
+    {
+      "scenario": "transcript",
+      "sample": 0,
+      "metrics": {
+        "transcript_mount_ms": 134.3,
+        "transcript_longtask_ms": 277,
+        "transcript_longtask_max_ms": 99
+      },
+      "detail": {
+        "turns": 1000,
+        "messages": 2000,
+        "longtasks": 3
+      }
+    },
+    {
+      "scenario": "transcript",
+      "sample": 1,
+      "metrics": {
+        "transcript_mount_ms": 135.4,
+        "transcript_longtask_ms": 253,
+        "transcript_longtask_max_ms": 99
+      },
+      "detail": {
+        "turns": 1000,
+        "messages": 2000,
+        "longtasks": 3
+      }
+    },
+    {
+      "scenario": "transcript",
+      "sample": 2,
+      "metrics": {
+        "transcript_mount_ms": 138,
+        "transcript_longtask_ms": 283,
+        "transcript_longtask_max_ms": 110
+      },
+      "detail": {
+        "turns": 1000,
+        "messages": 2000,
+        "longtasks": 3
+      }
+    },
+    {
+      "scenario": "complete-stream",
+      "sample": 0,
+      "chars": 67584,
+      "elapsedMs": 2944.2403999999988,
+      "rendererTaskMs": 899.2489999999993
+    },
+    {
+      "scenario": "complete-stream",
+      "sample": 1,
+      "chars": 67584,
+      "elapsedMs": 2937.4870999999985,
+      "rendererTaskMs": 934.4609999999989
+    },
+    {
+      "scenario": "complete-stream",
+      "sample": 2,
+      "chars": 67584,
+      "elapsedMs": 2922.2040999999954,
+      "rendererTaskMs": 865.4920000000014
+    }
+  ],
+  "rendererIndexSha256": "429c46568b42df01655d3a674346796da47d4abaaa24c863db3ec4126a1f8ed4",
+  "environment": {
+    "width": 1220,
+    "height": 800,
+    "electron": "40.10.2",
+    "note": "Version recorded from the shared Electron install; environment capture added after this run."
+  }
+}

@@ -1,0 +1,116 @@
+{
+  "environment": {
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HermesE2E-1792914186950/0.0.0 Chrome/144.0.7559.236 Electron/40.10.2 Safari/537.36",
+    "width": 1220,
+    "height": 800
+  },
+  "rendererIndexSha256": "429c46568b42df01655d3a674346796da47d4abaaa24c863db3ec4126a1f8ed4",
+  "rendererErrors": [],
+  "results": [
+    {
+      "scenario": "transcript",
+      "sample": 0,
+      "metrics": {
+        "transcript_mount_ms": 132,
+        "transcript_longtask_ms": 286,
+        "transcript_longtask_max_ms": 102
+      },
+      "detail": {
+        "turns": 200,
+        "messages": 400,
+        "longtasks": 3
+      }
+    },
+    {
+      "scenario": "transcript",
+      "sample": 1,
+      "metrics": {
+        "transcript_mount_ms": 118.7,
+        "transcript_longtask_ms": 260,
+        "transcript_longtask_max_ms": 87
+      },
+      "detail": {
+        "turns": 200,
+        "messages": 400,
+        "longtasks": 3
+      }
+    },
+    {
+      "scenario": "transcript",
+      "sample": 2,
+      "metrics": {
+        "transcript_mount_ms": 153.6,
+        "transcript_longtask_ms": 267,
+        "transcript_longtask_max_ms": 103
+      },
+      "detail": {
+        "turns": 200,
+        "messages": 400,
+        "longtasks": 3
+      }
+    },
+    {
+      "scenario": "transcript",
+      "sample": 0,
+      "metrics": {
+        "transcript_mount_ms": 123.2,
+        "transcript_longtask_ms": 259,
+        "transcript_longtask_max_ms": 97
+      },
+      "detail": {
+        "turns": 1000,
+        "messages": 2000,
+        "longtasks": 3
+      }
+    },
+    {
+      "scenario": "transcript",
+      "sample": 1,
+      "metrics": {
+        "transcript_mount_ms": 125.4,
+        "transcript_longtask_ms": 249,
+        "transcript_longtask_max_ms": 100
+      },
+      "detail": {
+        "turns": 1000,
+        "messages": 2000,
+        "longtasks": 3
+      }
+    },
+    {
+      "scenario": "transcript",
+      "sample": 2,
+      "metrics": {
+        "transcript_mount_ms": 138.9,
+        "transcript_longtask_ms": 308,
+        "transcript_longtask_max_ms": 102
+      },
+      "detail": {
+        "turns": 1000,
+        "messages": 2000,
+        "longtasks": 4
+      }
+    },
+    {
+      "scenario": "complete-stream",
+      "sample": 0,
+      "chars": 67584,
+      "elapsedMs": 2919.2740000000013,
+      "rendererTaskMs": 977.354
+    },
+    {
+      "scenario": "complete-stream",
+      "sample": 1,
+      "chars": 67584,
+      "elapsedMs": 2949.0494,
+      "rendererTaskMs": 910.4240000000008
+    },
+    {
+      "scenario": "complete-stream",
+      "sample": 2,
+      "chars": 67584,
+      "elapsedMs": 2934.959200000005,
+      "rendererTaskMs": 894.9850000000001
+    }
+  ]
+}

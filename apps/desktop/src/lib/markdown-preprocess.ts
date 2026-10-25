@@ -1180,6 +1180,12 @@ export function preprocessMarkdown(text: string): string {
  * them regardless of this function.
  */
 export function normalizeFilePreviewMath(text: string): string {
+  // Every supported math/currency form starts with $, a backslash, or [/.
+  // A document without them needs neither math rewrites nor code-span shielding.
+  if (!text.includes('$') && !text.includes('\\') && !text.includes('[/')) {
+    return text
+  }
+
   return splitFencedCode(text)
     .map(({ code, text: part }) => {
       if (code) {

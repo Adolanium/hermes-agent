@@ -1,0 +1,340 @@
+{
+  "initialElectron": [
+    {
+      "scenario": "transcript",
+      "turns": 200,
+      "metrics": {
+        "transcript_mount_ms": 200.8,
+        "transcript_longtask_ms": 586,
+        "transcript_longtask_max_ms": 199
+      },
+      "detail": {
+        "turns": 200,
+        "messages": 400,
+        "longtasks": 4
+      }
+    },
+    {
+      "scenario": "transcript",
+      "turns": 200,
+      "metrics": {
+        "transcript_mount_ms": 160,
+        "transcript_longtask_ms": 112,
+        "transcript_longtask_max_ms": 112
+      },
+      "detail": {
+        "turns": 200,
+        "messages": 400,
+        "longtasks": 1
+      }
+    },
+    {
+      "scenario": "transcript",
+      "turns": 200,
+      "metrics": {
+        "transcript_mount_ms": 170,
+        "transcript_longtask_ms": 296,
+        "transcript_longtask_max_ms": 114
+      },
+      "detail": {
+        "turns": 200,
+        "messages": 400,
+        "longtasks": 3
+      }
+    },
+    {
+      "scenario": "transcript",
+      "turns": 1000,
+      "metrics": {
+        "transcript_mount_ms": 142.2,
+        "transcript_longtask_ms": 274,
+        "transcript_longtask_max_ms": 95
+      },
+      "detail": {
+        "turns": 1000,
+        "messages": 2000,
+        "longtasks": 3
+      }
+    },
+    {
+      "scenario": "transcript",
+      "turns": 1000,
+      "metrics": {
+        "transcript_mount_ms": 135.8,
+        "transcript_longtask_ms": 287,
+        "transcript_longtask_max_ms": 104
+      },
+      "detail": {
+        "turns": 1000,
+        "messages": 2000,
+        "longtasks": 3
+      }
+    },
+    {
+      "scenario": "transcript",
+      "turns": 1000,
+      "metrics": {
+        "transcript_mount_ms": 145.8,
+        "transcript_longtask_ms": 281,
+        "transcript_longtask_max_ms": 107
+      },
+      "detail": {
+        "turns": 1000,
+        "messages": 2000,
+        "longtasks": 3
+      }
+    },
+    {
+      "scenario": "stream",
+      "metrics": {
+        "longtasks_n": 1,
+        "longtask_max_ms": 89,
+        "frame_p95_ms": 31.4,
+        "frame_p99_ms": 36.8,
+        "slow_frames_33": 7,
+        "intermut_p95_ms": 103.7
+      },
+      "detail": {
+        "historyTurns": 200,
+        "windowS": 4.5,
+        "avgFps": 57.9,
+        "frameHistogram": {
+          "<=16.7": 120,
+          "16.7-33": 133,
+          "33-50": 6,
+          "50-100": 1,
+          "100-200": 0,
+          ">200": 0
+        },
+        "mutations": 83,
+        "finalLen": 11035
+      }
+    }
+  ],
+  "expandedElectron": [
+    {
+      "scenario": "transcript",
+      "turns": 10,
+      "metrics": {
+        "transcript_mount_ms": 175.2,
+        "transcript_longtask_ms": 393,
+        "transcript_longtask_max_ms": 147
+      },
+      "detail": {
+        "turns": 10,
+        "messages": 20,
+        "longtasks": 3
+      }
+    },
+    {
+      "scenario": "transcript",
+      "turns": 10,
+      "metrics": {
+        "transcript_mount_ms": 78.2,
+        "transcript_longtask_ms": 61,
+        "transcript_longtask_max_ms": 61
+      },
+      "detail": {
+        "turns": 10,
+        "messages": 20,
+        "longtasks": 1
+      }
+    },
+    {
+      "scenario": "transcript",
+      "turns": 10,
+      "metrics": {
+        "transcript_mount_ms": 72.2,
+        "transcript_longtask_ms": 57,
+        "transcript_longtask_max_ms": 57
+      },
+      "detail": {
+        "turns": 10,
+        "messages": 20,
+        "longtasks": 1
+      }
+    },
+    {
+      "scenario": "transcript",
+      "turns": 50,
+      "metrics": {
+        "transcript_mount_ms": 99.9,
+        "transcript_longtask_ms": 126,
+        "transcript_longtask_max_ms": 73
+      },
+      "detail": {
+        "turns": 50,
+        "messages": 100,
+        "longtasks": 2
+      }
+    },
+    {
+      "scenario": "transcript",
+      "turns": 50,
+      "metrics": {
+        "transcript_mount_ms": 87,
+        "transcript_longtask_ms": 119,
+        "transcript_longtask_max_ms": 64
+      },
+      "detail": {
+        "turns": 50,
+        "messages": 100,
+        "longtasks": 2
+      }
+    },
+    {
+      "scenario": "transcript",
+      "turns": 50,
+      "metrics": {
+        "transcript_mount_ms": 83.6,
+        "transcript_longtask_ms": 117,
+        "transcript_longtask_max_ms": 62
+      },
+      "detail": {
+        "turns": 50,
+        "messages": 100,
+        "longtasks": 2
+      }
+    },
+    {
+      "scenario": "transcript",
+      "turns": 200,
+      "metrics": {
+        "transcript_mount_ms": 113.9,
+        "transcript_longtask_ms": 263,
+        "transcript_longtask_max_ms": 92
+      },
+      "detail": {
+        "turns": 200,
+        "messages": 400,
+        "longtasks": 3
+      }
+    },
+    {
+      "scenario": "transcript",
+      "turns": 200,
+      "metrics": {
+        "transcript_mount_ms": 109.3,
+        "transcript_longtask_ms": 236,
+        "transcript_longtask_max_ms": 84
+      },
+      "detail": {
+        "turns": 200,
+        "messages": 400,
+        "longtasks": 3
+      }
+    },
+    {
+      "scenario": "transcript",
+      "turns": 200,
+      "metrics": {
+        "transcript_mount_ms": 109.6,
+        "transcript_longtask_ms": 238,
+        "transcript_longtask_max_ms": 84
+      },
+      "detail": {
+        "turns": 200,
+        "messages": 400,
+        "longtasks": 3
+      }
+    },
+    {
+      "scenario": "transcript",
+      "turns": 1000,
+      "metrics": {
+        "transcript_mount_ms": 135.6,
+        "transcript_longtask_ms": 273,
+        "transcript_longtask_max_ms": 98
+      },
+      "detail": {
+        "turns": 1000,
+        "messages": 2000,
+        "longtasks": 3
+      }
+    },
+    {
+      "scenario": "transcript",
+      "turns": 1000,
+      "metrics": {
+        "transcript_mount_ms": 140.4,
+        "transcript_longtask_ms": 256,
+        "transcript_longtask_max_ms": 102
+      },
+      "detail": {
+        "turns": 1000,
+        "messages": 2000,
+        "longtasks": 3
+      }
+    },
+    {
+      "scenario": "transcript",
+      "turns": 1000,
+      "metrics": {
+        "transcript_mount_ms": 143.8,
+        "transcript_longtask_ms": 271,
+        "transcript_longtask_max_ms": 104
+      },
+      "detail": {
+        "turns": 1000,
+        "messages": 2000,
+        "longtasks": 3
+      }
+    },
+    {
+      "scenario": "stream",
+      "metrics": {
+        "longtasks_n": 1,
+        "longtask_max_ms": 84,
+        "frame_p95_ms": 31.1,
+        "frame_p99_ms": 37.5,
+        "slow_frames_33": 11,
+        "intermut_p95_ms": 157.8
+      },
+      "detail": {
+        "historyTurns": 200,
+        "windowS": 4.5,
+        "avgFps": 58,
+        "frameHistogram": {
+          "<=16.7": 127,
+          "16.7-33": 123,
+          "33-50": 10,
+          "50-100": 1,
+          "100-200": 0,
+          ">200": 0
+        },
+        "mutations": 73,
+        "finalLen": 10352
+      }
+    }
+  ],
+  "preprocessProfileSelfMs": {
+    "normalizeDisplayMathForMarkdown": 547.3759999999995,
+    "escapeCurrencyDollarsPreservingMath": 507.29099999999926,
+    "splitHuggingDisplayMath": 451.49399999999986,
+    "splitFencedCode": 382.5649999999999,
+    "": 316.0309999999999,
+    "escapeCjkProseDollars": 293.32699999999994,
+    "normalizeFenceBlocks": 220.39399999999992,
+    "rewriteProseSegment": 131.14400000000006,
+    "collectSourceListIds": 129.87900000000005,
+    "autoLinkRawUrls": 99.54900000000004,
+    "normalizeVisibleProse": 71.022,
+    "escapeUnknownHtmlLikeTags": 64.64200000000001,
+    "escapeLoneTildes": 64.18100000000001,
+    "linkBareUrls": 59.93400000000001,
+    "normalizeProseMath": 58.069000000000024,
+    "preprocessMarkdown": 45.75900000000001,
+    "routeFileLinksToPreview": 45.373,
+    "__name": 42.247,
+    "isCurrencyOpenerAt": 38.918000000000006,
+    "normalizeFilePreviewMath": 36.566,
+    "scrubBacktickNoise": 29.963,
+    "hasCloseFenceLine": 18.46,
+    "stripEmptyFenceBlocks": 16.703,
+    "findClosingFence": 7.571,
+    "stripReasoningBlocks": 4.614,
+    "liftDirectives": 4.567,
+    "isEscapedAt": 3.025,
+    "extend": 1.536
+  }
+}

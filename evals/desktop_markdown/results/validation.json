@@ -1,0 +1,19 @@
+{
+  "sourceSha256": "c538cc5249e4996650a76b1faa9d58d5abbe6cd0ad425946f1cd028005d84e50",
+  "baseCommit": "4ea8d23cc9f527332ccb1d55359b27741b6ea51b",
+  "tests": {
+    "passed": 271,
+    "existing": 269,
+    "added": 2,
+    "files": 26,
+    "newTestsOnBase": 2
+  },
+  "differentialComparisons": 8682,
+  "rendererTypecheck": "passed",
+  "targetedEslint": "passed",
+  "productionRendererBuild": "passed",
+  "repositoryChecks": {
+    "passed": 12,
+    "command": "python scripts/check --staged"
+  }
+}
