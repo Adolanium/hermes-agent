@@ -36,16 +36,18 @@ class MessageDeduplicator:
             del self._seen[msg_id]  # expired: treat as new
         self._seen[msg_id] = now
         if len(self._seen) > self._max_size:
-            cutoff = now - self._ttl
-            self._seen = {k: v for k, v in self._seen.items() if v > cutoff}
-            if len(self._seen) > self._max_size:
-                # All entries still fresh: keep the newest so max_size holds under load.
-                if self._max_size > 0 and len(self._seen) == self._max_size + 1:
-                    # A single eviction needs no sort; min preserves the oldest tie.
-                    del self._seen[min(self._seen, key=self._seen.__getitem__)]
-                else:
-                    self._seen = dict(sorted(self._seen.items(), key=lambda item: item[1])[-self._max_size:])
+            self._prune(now)
         return False
+
+    def _prune(self, now: float) -> None:
+        cutoff = now - self._ttl
+        self._seen = {k: v for k, v in self._seen.items() if v > cutoff}
+        if len(self._seen) > self._max_size:
+            if self._max_size > 0 and len(self._seen) == self._max_size + 1:
+                # A single eviction needs no sort; min preserves the oldest tie.
+                del self._seen[min(self._seen, key=self._seen.__getitem__)]
+            else:
+                self._seen = dict(sorted(self._seen.items(), key=lambda item: item[1])[-self._max_size:])
 
     def contains(self, msg_id: str) -> bool:
         """Return whether *msg_id* is live in the cache without inserting it."""
