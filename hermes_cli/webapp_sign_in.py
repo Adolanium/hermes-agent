@@ -23,8 +23,10 @@ token (the bundled password provider decodes base64 leniently, so the quoted coo
 So on the gateway's Webapp behind the gate a provider token works on its own only when this listener
 gave it to a native app's sign-in (RFC 8252: ``/auth/native/token``, then ``/auth/native/refresh``). The
 listener keeps a digest of each such token until it expires, in ``RECORD_PATH`` under the gateway home
-(``app.state.webapp_home``), so native apps stay signed in across a restart and a sign-out. A browser
-login's tokens therefore work only as that login's cookies and end with it.
+(``app.state.webapp_home``), so a restart that does not sign out still accepts them. Sign-out drops
+that record (:func:`revoke`, run by ``browser_credential.rotate`` and by the stored-credential
+replacement when nothing is serving), so those tokens no longer work on their own. A browser login's
+tokens therefore work only as that login's cookies and end with it.
 """
 from __future__ import annotations
 
@@ -193,7 +195,47 @@ def _write(path: Path, records: dict[str, int]) -> None:
         _log.warning("Could not save the Webapp's record of native sign-ins: %s", exc)
 
 
+def revoke(home: Optional[Path] = None) -> int:
+    """Drop native sign-ins recorded for *home* so those tokens no longer work on their own.
+
+    Sign-out runs this. With no *home*, that is the Webapp this process is serving. A restart
+    that does not sign out leaves the file in place, and the next start of this listener still
+    accepts the tokens it gave out. Returns how many recorded tokens it dropped.
+    """
+    if home is None:
+        home = _serving_home()
+    else:
+        home = Path(home)
+    with _records_lock:
+        records = _loaded(home)
+        dropped = len(records)
+        records.clear()
+        if home is not None:
+            _drop_file(home / RECORD_PATH)
+    return dropped
+
+
+def _serving_home() -> Optional[Path]:
+    from hermes_cli.web_server import app
+
+    raw = getattr(app.state, "webapp_home", None)
+    return None if raw is None else Path(raw)
+
+
+def _drop_file(path: Path) -> None:
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        return
+    except OSError as exc:  # memory is already clear; an empty file beats a record a restart would honour
+        _log.warning("Could not drop the Webapp's record of native sign-ins: %s", exc)
+        _write(path, {})
+
+
 def _reset_for_tests() -> None:
     """Forget every loaded record, as a new process starts with only the files."""
     with _records_lock:
         _records.clear()
+
+
+browser_credential.on_rotate("native sign-ins", revoke)

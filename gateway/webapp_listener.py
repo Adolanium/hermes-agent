@@ -254,6 +254,21 @@ def browser_session_token(home, *, rotate: bool = False) -> str:
     return token
 
 
+def sign_out_stored_credential(home) -> str:
+    """Replace the browser credential stored for *home* and drop native sign-ins recorded there.
+
+    ``hermes webapp --sign-out`` does this when no listener is serving the Webapp, so the
+    replacement is the whole sign-out. A listener that failed to start replaces the credential
+    alone (:func:`browser_session_token`) and is not a sign-out: native tokens it gave out still
+    work when this listener serves again.
+    """
+    token = browser_session_token(home, rotate=True)
+    from hermes_cli.webapp_sign_in import revoke
+
+    revoke(home)
+    return token
+
+
 def _readable_by_other_users(path: Path) -> bool:
     """POSIX: whether *path* grants group or other access, or belongs to another user. Windows homes
     keep their own ACL."""
@@ -335,7 +350,8 @@ def register_control_verbs(runner, home, server=None, *, links_checked: bool | N
     the credential crosses neither the socket nor a browser's argv; where nothing can check who
     redeems such a link (macOS, the BSDs, WSL) it is marked private, for the user to open by hand.
     ``webapp-sign-out`` replaces the browser credential, which also ends every login bound to it
-    behind the sign-in gate, closes the browser sockets those opened, and reports how many it closed.
+    behind the sign-in gate, closes the browser sockets those opened, drops the tokens this listener
+    gave native apps, and reports how many browser sockets it closed.
 
     *links_checked* is whether such a link can be checked here; None asks this host
     (:func:`_one_use_links_work`) at each launch. Tests pass False to take the printed-link path on
@@ -410,15 +426,17 @@ def register_control_verbs(runner, home, server=None, *, links_checked: bool | N
             raise RuntimeError(_STILL_STARTING)
         if runner.webapp_status["state"] != "serving":
             # No browser reaches this gateway's Webapp and it holds no browser credential: replacing
-            # the stored one is the whole sign-out, and the next start serves the new one.
-            browser_session_token(home, rotate=True)
+            # the stored one, and dropping native sign-ins recorded beside it, is the whole sign-out.
+            # The next start serves the new credential and does not accept those tokens.
+            sign_out_stored_credential(home)
             return {"signed_out": True, "serving": False, "sign_in_gate": False, "connections_closed": 0}
         _, web = serving()
         # Every tab loses access at once: every grant made under the old credential ends, and the
         # sockets and media links it opened end now, not when each tab next reconnects. Behind the
         # sign-in gate every login is bound to the credential (hermes_cli.webapp_sign_in), so those
-        # browsers are signed out and their sockets close too. Native clients never held it and stay
-        # connected.
+        # browsers are signed out and their sockets close too. The rotation also drops tokens this
+        # listener gave native apps, so those stop working on their own. Native clients that
+        # authenticated with a gateway grant never held the credential and stay connected.
         ended = browser_credential.rotate(browser_session_token(home, rotate=True))
         return {"signed_out": True, "serving": True,
                 "sign_in_gate": bool(getattr(web.app.state, "auth_required", False)),

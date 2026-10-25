@@ -533,7 +533,8 @@ async def start_gateway_runtime_api(runner):
         runner.webapp_status = {"state": "unavailable", "url": None, "reason": reason}
         # Open tabs keep sending their credential to whatever answers on the Webapp's port, and that
         # is not this gateway now. Replace it, so one captured there never opens this gateway; the
-        # tabs sign in again once the Webapp is back.
+        # tabs sign in again once the Webapp is back. This is not a sign-out: native tokens this
+        # listener gave out stay recorded and work again when the Webapp is served.
         try:
             browser_session_token(home, rotate=True)
         except OSError as write_error:

@@ -180,7 +180,8 @@ def _signed_out_summary(result: dict) -> str:
     """What a gateway's ``webapp-sign-out`` answer says it did, for the user."""
     if not result.get("serving", True):
         return ("The gateway is not serving the Webapp, so no browser is connected to it. Replaced its stored "
-                "browser credential: every browser must sign in again once it serves the Webapp.")
+                "browser credential and signed out native apps recorded here: every browser and those apps "
+                "must sign in again once it serves the Webapp.")
     if "connections_closed" not in result:
         # A gateway started before this Hermes: it replaced the credential and closed the sockets that
         # credential opened, but logins behind the sign-in gate outlive it.
@@ -190,13 +191,14 @@ def _signed_out_summary(result: dict) -> str:
     connections = f"closed {closed} browser connection{'' if closed == 1 else 's'}"
     if result.get("sign_in_gate"):
         return (f"Signed out every browser: {connections}. Every browser login behind sign-in has ended, "
-                "and the account tokens it held no longer work here: browsers must sign in again. Native apps "
-                "signed in to this gateway with their own sign-in stay signed in.")
+                "and the account tokens it held no longer work here. Native apps that signed in here "
+                "are signed out too: their tokens no longer work on their own. Browsers and those apps "
+                "must sign in again.")
     return f"Signed out of every Webapp tab: {connections}. Run hermes webapp to open it again."
 
 
 def _sign_out(target: Path) -> int:
-    from gateway.webapp_listener import BrowserCredentialError, browser_session_token
+    from gateway.webapp_listener import BrowserCredentialError, sign_out_stored_credential
     for attempt in range(_START_WAIT_ATTEMPTS + 1):
         try:
             response = _control(target, "webapp-sign-out")
@@ -208,14 +210,15 @@ def _sign_out(target: Path) -> int:
         state = _gateway_state(target)
         if response is None and state == "absent":
             # No gateway is running: replace the stored credential so no browser can use the old one
-            # when one starts. Behind the sign-in gate, logins bound to it end too.
+            # when one starts, and drop native sign-ins recorded beside it. Behind the sign-in gate,
+            # logins bound to the credential end too.
             try:
-                browser_session_token(target, rotate=True)
+                sign_out_stored_credential(target)
             except BrowserCredentialError as exc:
                 print(f"Nobody was signed out: {exc}")
                 return 1
             print("No gateway is running for this profile. Replaced the stored Webapp credential: every browser "
-                  "must sign in again when the gateway next serves the Webapp.")
+                  "and every native app signed in here must sign in again when the gateway next serves the Webapp.")
             return 0
         if state != "starting":
             reason = _refusal(response) if response is not None else f"the gateway did not answer (state: {state})"

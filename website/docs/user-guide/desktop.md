@@ -62,7 +62,7 @@ tab at once: their open connections close, Bot Desktop viewers included, and eac
 instructions. Behind the sign-in gate (below) it also signs out every browser that signed in with a
 dashboard account; each must sign in again. The account tokens such a login keeps in its cookies work
 on the Webapp only as that login (the gateway refuses them as a bearer token, on a connection's URL and
-on its token refresh), so they end with it. A native Hermes app that signed in to the gateway on its own stays signed in.
+on its token refresh), so they end with it. A native Hermes app that signed in to the gateway on its own is signed out too and must sign in again.
 
 For a named profile, `hermes -p work webapp` opens the Webapp on `work`. Profiles the default gateway
 serves share its Webapp; a standalone profile's own gateway serves its own when its config turns it on.

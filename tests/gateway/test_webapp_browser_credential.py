@@ -101,6 +101,8 @@ def test_signing_out_of_a_gateway_not_serving_the_webapp_replaces_the_stored_cre
     from gateway.control_socket import GatewayControlServer
 
     before = webapp.browser_session_token(tmp_path)
+    record = tmp_path / "webapp" / "native-sign-in-tokens.json"
+    record.write_text('{"abc": 9999999999}\n', encoding="utf-8")
     runner = SimpleNamespace(session_control_server=GatewayControlServer(tmp_path), webapp_status=status,
                              session_api=SimpleNamespace(app=SimpleNamespace(web=None)))
     webapp.register_control_verbs(runner, tmp_path)
@@ -109,3 +111,4 @@ def test_signing_out_of_a_gateway_not_serving_the_webapp_replaces_the_stored_cre
     assert answer["ok"], answer
     assert answer["result"] == {"signed_out": True, "serving": False, "sign_in_gate": False, "connections_closed": 0}
     assert webapp.browser_session_token(tmp_path) != before
+    assert not record.exists()

@@ -7,8 +7,9 @@ the login's requests get 401 and the sign-in view, the sockets and host terminal
 4401, tickets it minted open nothing, and its cookies replayed from anywhere get nothing. The provider
 tokens those cookies hold work only as those cookies: the Webapp's listener refuses them as a bearer
 token, on the refresh route and as a socket's ``?token=``, before and after sign-out and across a
-restart. Signing in again works, and a native app's own sign-in on the same listener (and the sockets
-it opens) stays signed in. The standalone dashboard has no
+restart. Signing in again works. A native app's own sign-in on the same listener works on its own
+until sign-out drops the listener's record of it, including after a restart; a restart that does
+not sign out still accepts it. The standalone dashboard has no
 browser credential and keeps its logins as on main.
 """
 import json
@@ -275,7 +276,7 @@ def test_the_webapp_leaves_cookies_named_for_no_gateway_to_the_dashboard(gated, 
 # A browser's login keeps the sign-in provider's access and refresh token in its cookies. Copied out of
 # them they are the kind of token a native app presents as ``Authorization: Bearer`` and renews on
 # ``/auth/native/refresh``. On the Webapp's listener they work only as that login's cookies, so signing
-# out ends them everywhere there; a native app's own sign-in on the same listener stays signed in.
+# out ends them everywhere there. A native app's own sign-in works on its own until sign-out drops it.
 
 @pytest.fixture
 def clock(monkeypatch):
@@ -431,17 +432,67 @@ def _native_app_sign_in(gated):
     return tokens.json()["access_token"], tokens.json()["refresh_token"]
 
 
-def test_a_native_app_signed_in_on_the_webapps_listener_stays_signed_in(gated, sign_out, monkeypatch):
-    """Signing the browsers out leaves a native app's own sign-in alone, across a restart too, and the
-    pair it renews keeps working."""
+def test_sign_out_stops_a_native_apps_tokens_working_alone(gated, sign_out, monkeypatch):
+    """``hermes webapp --sign-out`` rotates the browser credential, which drops the tokens this
+    listener gave a native app. Those tokens then work nowhere on their own, including after a
+    restart. A browser login's tokens stay refused on their own, a bearer never given to a native
+    app still does not work alone, and a native app can sign in again."""
+    import time
+
+    import tests.hermes_cli.conftest_dashboard_auth as stub_auth
+
     access, refresh = _native_app_sign_in(gated)
+    browser = gated.browser()
+    _sign_in_with_password(browser)
+    stolen = _tokens(browser)
     sign_out()
+    _refused_alone(gated, access, refresh)
+    _refused_alone(gated, *stolen)
+    _restart(gated, monkeypatch)
+    _refused_alone(gated, access, refresh)
+    _refused_alone(gated, "never-issued-access", "never-issued-refresh")
+    issued_at = time.time()
+    monkeypatch.setattr(stub_auth.time, "time", lambda: issued_at + 5)
+    fresh_access, fresh_refresh = _native_app_sign_in(gated)
+    assert (fresh_access, fresh_refresh) != (access, refresh)
+    assert gated.browser().get("/api/auth/me", headers=_bearer(fresh_access)).status_code == 200
+    renewed = _renew(gated, fresh_refresh)
+    assert renewed.status_code == 200
+    _refused_alone(gated, access, refresh)
+
+
+def test_a_restart_without_sign_out_keeps_a_native_apps_tokens(gated, monkeypatch):
+    """The record lives in the gateway home, so a new process that does not sign out still accepts
+    the tokens this listener gave a native app, and the pair it renews keeps working."""
+    access, refresh = _native_app_sign_in(gated)
     _restart(gated, monkeypatch)
     assert gated.browser().get("/api/auth/me", headers=_bearer(access)).status_code == 200
     renewed = _renew(gated, refresh)
     assert renewed.status_code == 200
     assert gated.browser().get("/api/auth/me", headers=_bearer(renewed.json()["access_token"])).status_code == 200
-    assert _renew(gated, renewed.json()["refresh_token"]).status_code == 200
+
+
+def test_replacing_the_stored_credential_without_sign_out_keeps_native_tokens(gated, monkeypatch, tmp_path):
+    """A listener that fails to start replaces the stored credential and is not a sign-out. The
+    native tokens this listener gave out still work when it serves again."""
+    from gateway.webapp_listener import browser_session_token
+
+    access, refresh = _native_app_sign_in(gated)
+    token = browser_session_token(tmp_path / ".hermes", rotate=True)
+    _restart(gated, monkeypatch, token=token)
+    assert gated.browser().get("/api/auth/me", headers=_bearer(access)).status_code == 200
+    assert _renew(gated, refresh).status_code == 200
+
+
+def test_sign_out_while_nothing_is_serving_drops_native_tokens(gated, monkeypatch, tmp_path):
+    """With no Webapp being served, sign-out replaces the stored credential and drops the record,
+    so the next start does not accept those tokens on their own."""
+    from gateway.webapp_listener import sign_out_stored_credential
+
+    access, refresh = _native_app_sign_in(gated)
+    token = sign_out_stored_credential(tmp_path / ".hermes")
+    _restart(gated, monkeypatch, token=token)
+    _refused_alone(gated, access, refresh)
 
 
 def test_only_the_spelling_given_to_a_native_app_works(gated):
@@ -515,15 +566,16 @@ def test_a_logins_access_token_opens_none_of_the_token_sockets(gated, sign_out, 
     assert _socket_close_code(gated.browser(), path, access) == 4401
 
 
-def test_a_native_apps_token_opens_a_socket_that_stays_open_across_sign_out(gated, sign_out):
-    """A token the listener gave a native app's sign-in opens a socket as ``?token=``; signing the
-    browsers out leaves that socket open and the token working."""
+def test_a_native_apps_token_opens_a_socket_until_sign_out(gated, sign_out):
+    """A token the listener gave a native app's sign-in opens a socket as ``?token=``. Sign-out does
+    not track that socket (a gateway grant never held the browser credential) but drops the token,
+    so it opens nothing afterwards."""
     access, _refresh = _native_app_sign_in(gated)
     with gated.browser().websocket_connect(f"ws://hermes.lan:9120/api/events?channel=desk&token={access}") as events:
         assert _close_code(events, 0.2) is None
         assert sign_out()["connections_closed"] == 0
         assert _close_code(events, 0.5) is None
-    assert _socket_close_code(gated.browser(), "/api/events?channel=desk", access) is None
+    assert _socket_close_code(gated.browser(), "/api/events?channel=desk", access) == 4401
 
 
 @pytest.mark.platforms("posix")

@@ -264,13 +264,14 @@ def test_sign_out_replaces_the_browser_credential_on_the_running_gateway(world, 
 
 def test_sign_out_behind_the_sign_in_gate_says_browsers_must_sign_in_again(world, capsys):
     """It says exactly what ended: every browser login and the account tokens it held, which work on
-    the Webapp only as that login. Native apps' own sign-ins stay."""
+    the Webapp only as that login, and native apps signed in here, whose tokens stop working alone."""
     world["answers"]["webapp-sign-out"]["result"] = {
         "signed_out": True, "serving": True, "sign_in_gate": True, "connections_closed": 1}
     assert launcher.cmd_webapp(_args(sign_out=True)) == 0
     out = capsys.readouterr().out
     assert "closed 1 browser connection." in out and "must sign in again" in out
-    assert "tokens" in out and "Native apps" in out and "stay signed in" in out
+    assert "tokens" in out and "Native apps" in out and "signed out" in out
+    assert "stay signed in" not in out
 
 
 def test_sign_out_on_a_gateway_not_serving_the_webapp_says_no_browser_was_connected(world, capsys):
@@ -311,12 +312,16 @@ def test_a_gateway_that_will_not_start_is_reported(world, capsys):
 
 def test_signing_out_with_no_gateway_running_still_replaces_the_stored_credential(world, capsys):
     from gateway.webapp_listener import TOKEN_PATH, browser_session_token
+    from hermes_cli.webapp_sign_in import RECORD_PATH
     before = browser_session_token(world["root"])
+    record = world["root"] / RECORD_PATH
+    record.write_text('{"abc": 9999999999}\n', encoding="utf-8")
     world["answers"]["webapp-sign-out"] = launcher.GatewayUnreachable("no gateway")
     assert launcher.cmd_webapp(_args(sign_out=True)) == 0
     assert (world["root"] / TOKEN_PATH).read_text().strip() != before
+    assert not record.exists()
     out = capsys.readouterr().out
-    assert "No gateway is running" in out and "sign in again" in out
+    assert "No gateway is running" in out and "sign in again" in out and "native app" in out
 
 
 def test_signing_out_with_no_gateway_and_a_credential_that_cannot_be_stored_says_nobody_was(world, capsys):
