@@ -49,9 +49,21 @@ def summarize(runs):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("directory", nargs="?", type=Path, default=Path(__file__).parent / "results")
+    parser.add_argument("--controls", action="store_true", help="compare longer batches, including the unchanged copy")
     args = parser.parse_args()
-    files = [f"paired-{i}.json" for i in (1, 2)]
+    prefix = "controls" if args.controls else "paired"
+    files = [f"{prefix}-{i}.json" for i in (1, 2)]
     runs = [json.loads((args.directory / name).read_bytes()) for name in files]
+    if args.controls:
+        assert runs[0]["confirmation_sha256"] == runs[1]["confirmation_sha256"]
+        comparisons = {}
+        for version in ("baseline_copy", "optimized"):
+            selected = [{"differential_verification": None, **run, "results": {
+                name: {"baseline": case["baseline"], "optimized": case[version]}
+                for name, case in run["results"].items()}} for run in runs]
+            comparisons[version] = summarize(selected)
+        print(json.dumps({"runs": files, "comparisons": comparisons}, indent=2))
+        return
     print(json.dumps({
         "baseline_ref": runs[0]["baseline_ref"], "runs": files,
         "bootstrap": {"replicates": 5000, "seed_per_case": 20261025,

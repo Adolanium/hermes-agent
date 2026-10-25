@@ -1,0 +1,249 @@
+{
+  "baseline_ref": "4ea8d23cc9f527332ccb1d55359b27741b6ea51b",
+  "runs": [
+    "paired-1.json",
+    "paired-2.json"
+  ],
+  "bootstrap": {
+    "replicates": 5000,
+    "seed_per_case": 20261025,
+    "method": "Resample baseline/optimized batch pairs within each process; ratio of pooled medians."
+  },
+  "all_output_hashes_equal": true,
+  "cases": {
+    "below_capacity_100": {
+      "medians_ms": {
+        "baseline": 0.02835089000000153,
+        "optimized": 0.028183945000637322
+      },
+      "speedup": 1.005923407789805,
+      "time_change_percent": -0.5888527639315688,
+      "process_speedups": [
+        1.008630463347553,
+        1.0310223151135027
+      ],
+      "ranges_ms": {
+        "baseline": [
+          0.025712940000812524,
+          0.03398821000009775
+        ],
+        "optimized": [
+          0.025753500001155772,
+          0.030154770001536234
+        ]
+      },
+      "paired_bootstrap_95_percent": [
+        0.9686862016435667,
+        1.0512816518640427
+      ]
+    },
+    "duplicate_hits_2000": {
+      "medians_ms": {
+        "baseline": 1.0139206500170985,
+        "optimized": 1.0231253000092693
+      },
+      "speedup": 0.9910033991026442,
+      "time_change_percent": 0.9078274509958462,
+      "process_speedups": [
+        1.0221286258128564,
+        1.0072398247623282
+      ],
+      "ranges_ms": {
+        "baseline": [
+          0.9744024999963585,
+          1.216707799991127
+        ],
+        "optimized": [
+          0.9599404000327922,
+          1.1742024999693967
+        ]
+      },
+      "paired_bootstrap_95_percent": [
+        0.9554481849764681,
+        1.054512671192757
+      ]
+    },
+    "fresh_2000_cap1000": {
+      "medians_ms": {
+        "baseline": 164.7070250037359,
+        "optimized": 88.70378000137862
+      },
+      "speedup": 1.8568208141882574,
+      "time_change_percent": -46.14450719429446,
+      "process_speedups": [
+        1.7755950626956594,
+        1.8657807696574324
+      ],
+      "ranges_ms": {
+        "baseline": [
+          158.16439999616705,
+          178.7779500009492
+        ],
+        "optimized": [
+          85.91793999657966,
+          101.92126000183634
+        ]
+      },
+      "paired_bootstrap_95_percent": [
+        1.803741434970338,
+        1.8711443300243489
+      ]
+    },
+    "fresh_4000_cap2000": {
+      "medians_ms": {
+        "baseline": 672.518499995931,
+        "optimized": 354.1410000179894
+      },
+      "speedup": 1.8990133872151738,
+      "time_change_percent": -47.34107685957605,
+      "process_speedups": [
+        1.9009148587951152,
+        1.8962187369549806
+      ],
+      "ranges_ms": {
+        "baseline": [
+          647.0856000087224,
+          711.6693999851122
+        ],
+        "optimized": [
+          346.30590002052486,
+          398.9731000037864
+        ]
+      },
+      "paired_bootstrap_95_percent": [
+        1.877787353431199,
+        1.910105632798339
+      ]
+    },
+    "fresh_200_cap10": {
+      "medians_ms": {
+        "baseline": 0.6052717999846209,
+        "optimized": 0.3533805499901064
+      },
+      "speedup": 1.7128045106092193,
+      "time_change_percent": -41.61622101028244,
+      "process_speedups": [
+        1.6047911247359548,
+        1.7472589071693863
+      ],
+      "ranges_ms": {
+        "baseline": [
+          0.5730767999775708,
+          0.707187200023327
+        ],
+        "optimized": [
+          0.3389558999915607,
+          0.46440219998476095
+        ]
+      },
+      "paired_bootstrap_95_percent": [
+        1.6429766000893984,
+        1.772597856223317
+      ]
+    },
+    "tied_4000_cap2000": {
+      "medians_ms": {
+        "baseline": 665.8483499923022,
+        "optimized": 363.8574999931734
+      },
+      "speedup": 1.8299701119388627,
+      "time_change_percent": -45.3542987682736,
+      "process_speedups": [
+        1.7859920317907916,
+        1.8505520897130037
+      ],
+      "ranges_ms": {
+        "baseline": [
+          644.6645999967586,
+          798.1475999986287
+        ],
+        "optimized": [
+          342.8321999963373,
+          406.0067000100389
+        ]
+      },
+      "paired_bootstrap_95_percent": [
+        1.7951594873911088,
+        1.8611283785437274
+      ]
+    },
+    "rollback_4000_cap2000": {
+      "medians_ms": {
+        "baseline": 698.6213000054704,
+        "optimized": 370.9235999995144
+      },
+      "speedup": 1.8834641419591123,
+      "time_change_percent": -46.90634253541798,
+      "process_speedups": [
+        1.8817483974161886,
+        1.8690283878416916
+      ],
+      "ranges_ms": {
+        "baseline": [
+          662.4356999818701,
+          742.2132999927271
+        ],
+        "optimized": [
+          353.1358999898657,
+          533.0289999837987
+        ]
+      },
+      "paired_bootstrap_95_percent": [
+        1.8491067001026107,
+        1.9250529195967012
+      ]
+    },
+    "expiry_4000_cap2000": {
+      "medians_ms": {
+        "baseline": 1.2762997500249185,
+        "optimized": 1.283171500035678
+      },
+      "speedup": 0.9946447142797603,
+      "time_change_percent": 0.5384119216998551,
+      "process_speedups": [
+        1.0071123213191906,
+        0.980912511723846
+      ],
+      "ranges_ms": {
+        "baseline": [
+          1.2327324999205302,
+          1.3064265000866726
+        ],
+        "optimized": [
+          1.251361500035273,
+          1.3397880000411533
+        ]
+      },
+      "paired_bootstrap_95_percent": [
+        0.9737802679463773,
+        1.0177509814115895
+      ]
+    },
+    "handoff_4000_cap2000": {
+      "medians_ms": {
+        "baseline": 1.9405334999464685,
+        "optimized": 1.9821099999535363
+      },
+      "speedup": 0.9790241207561425,
+      "time_change_percent": 2.1425293615500385,
+      "process_speedups": [
+        0.9390496775302788,
+        0.9858451683925082
+      ],
+      "ranges_ms": {
+        "baseline": [
+          1.821452500007581,
+          2.4250399999436922
+        ],
+        "optimized": [
+          1.815342499903636,
+          2.4363275000359863
+        ]
+      },
+      "paired_bootstrap_95_percent": [
+        0.9177470201682091,
+        1.0278535821115473
+      ]
+    }
+  }
+}

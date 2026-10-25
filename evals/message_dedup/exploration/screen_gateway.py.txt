@@ -1,0 +1,51 @@
+import cProfile
+import json
+import os
+from pathlib import Path
+import pstats
+import statistics
+import sys
+import tempfile
+import timeit
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
+
+with tempfile.TemporaryDirectory(prefix="hermes-gateway-screen-") as directory:
+    os.environ["HERMES_HOME"] = directory
+    os.environ["HERMES_RUNTIME_DIR"] = str(Path(directory) / "runtime")
+    from gateway.platforms.base import BasePlatformAdapter, utf16_len
+    from gateway.platforms.helpers import MessageDeduplicator, split_text_fence_aware
+
+    prose = ("A generated explanation of the result with another line.\n" * 12 + "\n") * 300
+    emoji = ("Generated result with an emoji \U0001f680 and more text.\n" * 12 + "\n") * 300
+    table = "| Name | Value |\n| --- | --- |\n" + "".join(f"| generated-{i} | {i} |\n" for i in range(1000))
+    ids = [f"generated-{i}" for i in range(4000)]
+
+    def dedup_burst():
+        dedup = MessageDeduplicator(max_size=2000)
+        return sum(dedup.is_duplicate(msg_id) for msg_id in ids)
+
+    cases = {
+        "dedup_burst_4000": dedup_burst,
+        "base_prose": lambda: BasePlatformAdapter.truncate_message(prose, 4096),
+        "base_emoji_utf16": lambda: BasePlatformAdapter.truncate_message(emoji, 4096, utf16_len),
+        "newline_prose": lambda: split_text_fence_aware(prose, 4096, prefer_paragraphs=False),
+        "newline_emoji_utf16": lambda: split_text_fence_aware(emoji, 4096, utf16_len, prefer_paragraphs=False),
+        "paragraph_prose": lambda: split_text_fence_aware(prose, 4096),
+        "paragraph_table": lambda: split_text_fence_aware(table, 4096),
+    }
+    results = {}
+    for name, call in cases.items():
+        output = call()
+        timer = timeit.Timer(call)
+        number, _ = timer.autorange()
+        samples = [elapsed * 1000 / number for elapsed in timer.repeat(5, number)]
+        results[name] = {"median_ms": statistics.median(samples), "samples_ms": samples, "calls": number}
+        print(name, results[name]["median_ms"], flush=True)
+    (ROOT / ".cache/series-5/baseline.json").write_text(json.dumps(results, indent=2))
+    for name in ("dedup_burst_4000", "base_emoji_utf16", "paragraph_prose"):
+        profiler = cProfile.Profile()
+        profiler.runcall(cases[name])
+        with (ROOT / f".cache/series-5/{name}-profile.txt").open("w") as stream:
+            pstats.Stats(profiler, stream=stream).strip_dirs().sort_stats("cumulative").print_stats(25)
