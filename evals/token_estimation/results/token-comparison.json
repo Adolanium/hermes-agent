@@ -1,0 +1,80 @@
+{
+  "base": "4ea8d23cc9f527332ccb1d55359b27741b6ea51b",
+  "python": "3.14.9 (main, Oct 21 2026, 17:48:58) [MSC v.1944 64 bit (AMD64)]",
+  "rounds": 2,
+  "samples_per_round": 7,
+  "order": [
+    "before",
+    "after",
+    "after",
+    "before"
+  ],
+  "results": {
+    "ascii": {
+      "tokens": 65536,
+      "before_ms": 0.00014483390000532382,
+      "after_ms": 0.00014619865000713617,
+      "speedup": 0.9906650984687907
+    },
+    "chinese": {
+      "tokens": 262144,
+      "before_ms": 25.75144000002183,
+      "after_ms": 0.9055649992660619,
+      "speedup": 28.43687644828669
+    },
+    "japanese": {
+      "tokens": 262144,
+      "before_ms": 25.446979999833275,
+      "after_ms": 0.907329999608919,
+      "speedup": 28.046003119924983
+    },
+    "korean": {
+      "tokens": 211172,
+      "before_ms": 21.664725001028273,
+      "after_ms": 8.469820000755135,
+      "speedup": 2.557873130609238
+    },
+    "mixed": {
+      "tokens": 85198,
+      "before_ms": 3.7313979999453295,
+      "after_ms": 1.8972614999802317,
+      "speedup": 1.9667283608423025
+    },
+    "arabic": {
+      "tokens": 119000,
+      "before_ms": 1.2827180000022054,
+      "after_ms": 1.291520000086166,
+      "speedup": 0.9931847744646825
+    },
+    "accented": {
+      "tokens": 74532,
+      "before_ms": 1.2123129999963567,
+      "after_ms": 1.217715499951737,
+      "speedup": 0.995563413658121
+    },
+    "sparse_cjk": {
+      "tokens": 65602,
+      "before_ms": 1.2734710000222549,
+      "after_ms": 1.275444999919273,
+      "speedup": 0.9984523049624695
+    },
+    "alternating": {
+      "tokens": 163840,
+      "before_ms": 17.47421499894699,
+      "after_ms": 16.185104999749456,
+      "speedup": 1.0796479231501737
+    },
+    "short_mixed": {
+      "tokens": 4,
+      "before_ms": 0.0007400525000412017,
+      "after_ms": 0.0006433409999590366,
+      "speedup": 1.1503269651527308
+    },
+    "compression_budget_64_messages": {
+      "tokens": 262976,
+      "before_ms": 24.48329499893589,
+      "after_ms": 1.105130001087673,
+      "speedup": 22.154221652510873
+    }
+  }
+}
