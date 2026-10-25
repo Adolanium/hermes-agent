@@ -1,0 +1,101 @@
+baseline output_sha256: bc3571c820c52f5f78a66e7e315d703557eac60654b79c97a9614d6c9f0c8197
+         692185 function calls (677170 primitive calls) in 0.724 seconds
+
+   Ordered by: cumulative time
+   List reduced from 326 to 25 due to restriction <25>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        1    0.000    0.000    0.724    0.724 benchmark.py:75(skills_prompt)
+        1    0.000    0.000    0.723    0.723 prompt_builder.py:1233(build_skills_system_prompt)
+        1    0.004    0.004    0.722    0.722 prompt_builder.py:1367(_build_skills_system_prompt_inner)
+      500    0.003    0.000    0.346    0.001 prompt_builder.py:1154(_parse_skill_file)
+      500    0.003    0.000    0.271    0.001 skill_utils.py:67(parse_frontmatter)
+      500    0.000    0.000    0.266    0.001 skill_utils.py:58(yaml_load)
+      500    0.001    0.000    0.265    0.001 <baseline_hermes_yaml>:28(safe_load)
+      500    0.002    0.000    0.265    0.001 <baseline_hermes_yaml>:22(_load)
+        2    0.006    0.003    0.140    0.070 prompt_builder.py:1100(_build_skills_manifest)
+      500    0.005    0.000    0.132    0.000 main.py:437(load)
+     2500    0.011    0.000    0.130    0.000 __init__.py:476(relative_to)
+      500    0.005    0.000    0.128    0.000 main.py:57(__init__)
+     1536    0.053    0.000    0.125    0.000 <frozen os>:297(walk)
+      500    0.001    0.000    0.123    0.000 main.py:761(official_plug_ins)
+      500    0.001    0.000    0.115    0.000 glob.py:16(glob)
+ 1500/500    0.004    0.000    0.113    0.000 glob.py:90(_iglob)
+        1    0.005    0.005    0.102    0.102 skill_utils.py:469(resolve_skill_catalog)
+      500    0.012    0.000    0.097    0.000 constructor.py:115(get_single_data)
+     2033    0.095    0.000    0.095    0.000 {built-in method nt.scandir}
+     2500    0.007    0.000    0.085    0.000 <frozen _collections_abc>:1025(__contains__)
+      500    0.001    0.000    0.078    0.000 glob.py:135(_glob1)
+      500    0.004    0.000    0.072    0.000 prompt_builder.py:1137(_build_snapshot_entry)
+      500    0.002    0.000    0.070    0.000 glob.py:213(_listdir)
+      501    0.001    0.000    0.069    0.000 __init__.py:780(read_text)
+     1000    0.035    0.000    0.066    0.000 glob.py:179(_iterdir)
+
+
+         692185 function calls (677170 primitive calls) in 0.724 seconds
+
+   Ordered by: cumulative time
+   List reduced from 326 to 13 due to restriction <'official_plug_ins|glob.py'>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+      500    0.001    0.000    0.123    0.000 main.py:761(official_plug_ins)
+      500    0.001    0.000    0.115    0.000 glob.py:16(glob)
+ 1500/500    0.004    0.000    0.113    0.000 glob.py:90(_iglob)
+      500    0.001    0.000    0.078    0.000 glob.py:135(_glob1)
+      500    0.002    0.000    0.070    0.000 glob.py:213(_listdir)
+     1000    0.035    0.000    0.066    0.000 glob.py:179(_iterdir)
+      500    0.001    0.000    0.021    0.000 glob.py:141(_glob0)
+      500    0.000    0.000    0.019    0.000 glob.py:229(_lexists)
+     3000    0.002    0.000    0.004    0.000 glob.py:260(has_magic)
+     1500    0.001    0.000    0.002    0.000 glob.py:251(_join)
+      500    0.001    0.000    0.001    0.000 glob.py:46(iglob)
+     1000    0.000    0.000    0.001    0.000 glob.py:138(<genexpr>)
+     1000    0.000    0.000    0.000    0.000 glob.py:267(_ishidden)
+
+
+optimized output_sha256: bc3571c820c52f5f78a66e7e315d703557eac60654b79c97a9614d6c9f0c8197
+         622185 function calls (608170 primitive calls) in 0.626 seconds
+
+   Ordered by: cumulative time
+   List reduced from 308 to 25 due to restriction <25>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        1    0.000    0.000    0.626    0.626 benchmark.py:75(skills_prompt)
+        1    0.000    0.000    0.625    0.625 prompt_builder.py:1233(build_skills_system_prompt)
+        1    0.004    0.004    0.623    0.623 prompt_builder.py:1367(_build_skills_system_prompt_inner)
+      500    0.003    0.000    0.240    0.000 prompt_builder.py:1154(_parse_skill_file)
+      500    0.002    0.000    0.167    0.000 skill_utils.py:67(parse_frontmatter)
+      500    0.000    0.000    0.161    0.000 skill_utils.py:58(yaml_load)
+      500    0.001    0.000    0.161    0.000 hermes_yaml.py:38(safe_load)
+      500    0.002    0.000    0.161    0.000 hermes_yaml.py:32(_load)
+      500    0.004    0.000    0.153    0.000 main.py:437(load)
+        2    0.007    0.003    0.146    0.073 prompt_builder.py:1100(_build_skills_manifest)
+     2500    0.011    0.000    0.130    0.000 __init__.py:476(relative_to)
+     1536    0.053    0.000    0.128    0.000 <frozen os>:297(walk)
+      500    0.012    0.000    0.120    0.000 constructor.py:115(get_single_data)
+        1    0.006    0.006    0.106    0.106 skill_utils.py:469(resolve_skill_catalog)
+     2500    0.007    0.000    0.085    0.000 <frozen _collections_abc>:1025(__contains__)
+     2500    0.006    0.000    0.076    0.000 resolver.py:352(resolve)
+      500    0.004    0.000    0.070    0.000 prompt_builder.py:1137(_build_snapshot_entry)
+      501    0.001    0.000    0.069    0.000 __init__.py:780(read_text)
+     1533    0.069    0.000    0.069    0.000 {built-in method nt.scandir}
+     1000    0.002    0.000    0.068    0.000 skill_utils.py:441(skill_candidate_rank)
+     4000    0.005    0.000    0.068    0.000 resolver.py:338(versioned_resolver)
+     9508    0.004    0.000    0.060    0.000 <frozen _collections_abc>:1015(__iter__)
+    10530    0.007    0.000    0.055    0.000 __init__.py:269(_from_parsed_parts)
+     7008    0.009    0.000    0.055    0.000 __init__.py:63(__getitem__)
+      501    0.002    0.000    0.046    0.000 skill_utils.py:874(iter_skill_index_files)
+
+
+         622185 function calls (608170 primitive calls) in 0.626 seconds
+
+   Ordered by: cumulative time
+   List reduced from 308 to 1 due to restriction <'official_plug_ins|glob.py'>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+      500    0.000    0.000    0.000    0.000 hermes_yaml.py:19(official_plug_ins)
+
+
+Baseline source SHA-256: f97f0f08b6474c52434d0cffaa7ba0ecaa5b9279c4abcbb35c11d15f9c89db76
+Optimized source SHA-256: 6e183685e1961f6b0718312e96906a22b3b71170f311a32494f94aed32f16348
+Benchmark SHA-256: f070b25e03c13de0f07d61ef34142e18989546d954efb6a6eba917bdd461f57c

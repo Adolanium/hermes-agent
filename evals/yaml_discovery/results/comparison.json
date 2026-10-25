@@ -1,0 +1,327 @@
+{
+  "baseline_ref": "4ea8d23cc9f527332ccb1d55359b27741b6ea51b",
+  "runs": [
+    "paired-1.json",
+    "paired-2.json"
+  ],
+  "bootstrap": {
+    "replicates": 5000,
+    "seed_per_case": 20261025,
+    "method": "Resample baseline/optimized batch pairs within each process; ratio of pooled medians."
+  },
+  "all_output_hashes_equal": true,
+  "cases": {
+    "load_small": {
+      "medians_ms": {
+        "baseline": 0.36892220001027454,
+        "optimized": 0.14624817500589415
+      },
+      "speedup": 2.522576435537784,
+      "time_change_percent": -60.357990112326895,
+      "process_speedups": [
+        2.5112858976114887,
+        2.5254701491657254
+      ],
+      "ranges_ms": {
+        "baseline": [
+          0.35307419998571277,
+          0.41851519999909215
+        ],
+        "optimized": [
+          0.1417931499890983,
+          0.1736806999979308
+        ]
+      },
+      "paired_bootstrap_95_percent": [
+        2.4839026391697656,
+        2.536885116763709
+      ]
+    },
+    "load_small_bytes": {
+      "medians_ms": {
+        "baseline": 0.3664680999936536,
+        "optimized": 0.14697875000274507
+      },
+      "speedup": 2.493340703923589,
+      "time_change_percent": -59.89316668891769,
+      "process_speedups": [
+        2.53403097333609,
+        2.4774135414538776
+      ],
+      "ranges_ms": {
+        "baseline": [
+          0.35432919999584556,
+          0.3876589999999851
+        ],
+        "optimized": [
+          0.1408127000031527,
+          0.1819670499971835
+        ]
+      },
+      "paired_bootstrap_95_percent": [
+        2.4180196920226553,
+        2.5492000940106125
+      ]
+    },
+    "load_small_pure": {
+      "medians_ms": {
+        "baseline": 0.6165571000019554,
+        "optimized": 0.39031799999065697
+      },
+      "speedup": 1.5796276369952549,
+      "time_change_percent": -36.6939412441412,
+      "process_speedups": [
+        1.5846584415667306,
+        1.5697408490889262
+      ],
+      "ranges_ms": {
+        "baseline": [
+          0.5992320000077598,
+          0.6651086000492796
+        ],
+        "optimized": [
+          0.3823846000013873,
+          0.415509199956432
+        ]
+      },
+      "paired_bootstrap_95_percent": [
+        1.5484702091254055,
+        1.5911433754434632
+      ]
+    },
+    "load_large": {
+      "medians_ms": {
+        "baseline": 53.683559998171404,
+        "optimized": 53.872040001442656
+      },
+      "speedup": 0.9965013390384658,
+      "time_change_percent": 0.35109445662260264,
+      "process_speedups": [
+        0.9149936729890163,
+        1.033887583106771
+      ],
+      "ranges_ms": {
+        "baseline": [
+          51.077759999316186,
+          59.40446000313386
+        ],
+        "optimized": [
+          50.966539996443316,
+          61.210500000743195
+        ]
+      },
+      "paired_bootstrap_95_percent": [
+        0.9513257307192798,
+        1.032589099981004
+      ]
+    },
+    "load_pure_fallback": {
+      "medians_ms": {
+        "baseline": 0.6708120999974199,
+        "optimized": 0.26068035000935197
+      },
+      "speedup": 2.573312871389632,
+      "time_change_percent": -61.13958737322201,
+      "process_speedups": [
+        2.579891072940866,
+        2.536759847620662
+      ],
+      "ranges_ms": {
+        "baseline": [
+          0.6500411999877542,
+          0.8069620000314899
+        ],
+        "optimized": [
+          0.25434929999755695,
+          0.3163302000029944
+        ]
+      },
+      "paired_bootstrap_95_percent": [
+        2.5376297439639117,
+        2.6205185774819175
+      ]
+    },
+    "reject_invalid": {
+      "medians_ms": {
+        "baseline": 0.72719629999483,
+        "optimized": 0.29899764999572653
+      },
+      "speedup": 2.432113764122305,
+      "time_change_percent": -58.88350229534278,
+      "process_speedups": [
+        2.4508443078862596,
+        2.380057830768214
+      ],
+      "ranges_ms": {
+        "baseline": [
+          0.6905072000226937,
+          0.8068784000352025
+        ],
+        "optimized": [
+          0.2944553999986965,
+          0.3098777999985032
+        ]
+      },
+      "paired_bootstrap_95_percent": [
+        2.4060094351250885,
+        2.463973420572052
+      ]
+    },
+    "dump_small": {
+      "medians_ms": {
+        "baseline": 0.5595381000021007,
+        "optimized": 0.3356834500154946
+      },
+      "speedup": 1.666862337050794,
+      "time_change_percent": -40.00704330692864,
+      "process_speedups": [
+        1.652735152738866,
+        1.6735289777610827
+      ],
+      "ranges_ms": {
+        "baseline": [
+          0.5481038000434637,
+          0.5826561999856494
+        ],
+        "optimized": [
+          0.330345899972599,
+          0.34953849998419173
+        ]
+      },
+      "paired_bootstrap_95_percent": [
+        1.62958051972385,
+        1.694109617229639
+      ]
+    },
+    "dump_large": {
+      "medians_ms": {
+        "baseline": 200.62529999995604,
+        "optimized": 201.20295000378974
+      },
+      "speedup": 0.9971290182185558,
+      "time_change_percent": 0.2879248050140282,
+      "process_speedups": [
+        0.9940882724743604,
+        0.9979817125672775
+      ],
+      "ranges_ms": {
+        "baseline": [
+          195.78609999734908,
+          213.6074999871198
+        ],
+        "optimized": [
+          197.04460000502877,
+          207.47964999463875
+        ]
+      },
+      "paired_bootstrap_95_percent": [
+        0.9865900976896158,
+        1.0101811329132935
+      ]
+    },
+    "roundtrip_edit": {
+      "medians_ms": {
+        "baseline": 1.191254749937798,
+        "optimized": 0.9585643999744207
+      },
+      "speedup": 1.2427487918074014,
+      "time_change_percent": -19.53321487075097,
+      "process_speedups": [
+        1.198010029109008,
+        1.2551331489327817
+      ],
+      "ranges_ms": {
+        "baseline": [
+          1.1679840000579134,
+          1.334698999999091
+        ],
+        "optimized": [
+          0.9220649999915622,
+          1.1344209999660961
+        ]
+      },
+      "paired_bootstrap_95_percent": [
+        1.1963467564295727,
+        1.2785829560581656
+      ]
+    },
+    "skills_rebuild_100": {
+      "medians_ms": {
+        "baseline": 99.85505000076955,
+        "optimized": 79.88286000327207
+      },
+      "speedup": 1.2500184644951295,
+      "time_change_percent": -20.00118171023254,
+      "process_speedups": [
+        1.2861231005190235,
+        1.250177052435775
+      ],
+      "ranges_ms": {
+        "baseline": [
+          94.9329499999294,
+          121.21810000098776
+        ],
+        "optimized": [
+          76.43325999961235,
+          90.15746000222862
+        ]
+      },
+      "paired_bootstrap_95_percent": [
+        1.2102222747533222,
+        1.2922260497897318
+      ]
+    },
+    "skills_rebuild_500": {
+      "medians_ms": {
+        "baseline": 474.7909500001697,
+        "optimized": 384.5679499936523
+      },
+      "speedup": 1.2346087343160204,
+      "time_change_percent": -19.002678969867716,
+      "process_speedups": [
+        1.2762570069299366,
+        1.3233873387264439
+      ],
+      "ranges_ms": {
+        "baseline": [
+          460.83870000438765,
+          623.901000013575
+        ],
+        "optimized": [
+          356.1686000030022,
+          467.7500000107102
+        ]
+      },
+      "paired_bootstrap_95_percent": [
+        1.1709289810621335,
+        1.29271585408374
+      ]
+    },
+    "skills_warm_500": {
+      "medians_ms": {
+        "baseline": 68.23589999694377,
+        "optimized": 68.41887000191491
+      },
+      "speedup": 0.9973257376953752,
+      "time_change_percent": 0.2681433160247604,
+      "process_speedups": [
+        0.9868820351300517,
+        0.9909651359298951
+      ],
+      "ranges_ms": {
+        "baseline": [
+          65.7351799949538,
+          75.5165999988094
+        ],
+        "optimized": [
+          66.13991999765858,
+          76.41738000093028
+        ]
+      },
+      "paired_bootstrap_95_percent": [
+        0.9750487713844367,
+        1.0145501805338142
+      ]
+    }
+  }
+}
