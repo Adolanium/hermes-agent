@@ -150,12 +150,17 @@ def get_session_timeline(db, session_id, *, limit=500, after_row_id=0):
             ), eligible AS MATERIALIZED (SELECT * FROM prompts WHERE preview <> '')
         """
         params = {"sid": session_id, "after": after_row_id, "limit": limit + 1}
+        # Preserve the total on empty pages without evaluating every preview a second time.
         rows = conn.execute(sql + """
-            SELECT row_id, sort_id, timestamp, preview, (SELECT COUNT(*) FROM eligible) AS total
-            FROM eligible WHERE sort_id > :after ORDER BY sort_id LIMIT :limit
+            SELECT page.row_id, page.sort_id, page.timestamp, page.preview, totals.total
+            FROM (SELECT COUNT(*) AS total FROM eligible) AS totals
+            LEFT JOIN (SELECT row_id, sort_id, timestamp, preview FROM eligible
+                       WHERE sort_id > :after ORDER BY sort_id LIMIT :limit) AS page ON 1
+            ORDER BY page.sort_id
         """, params).fetchall()
-        total = rows[0]["total"] if rows else conn.execute(
-            sql + "SELECT COUNT(*) FROM eligible", params).fetchone()[0]
+        total = rows[0]["total"]
+        if rows[0]["row_id"] is None:
+            rows = []
     has_more = len(rows) > limit
     page = rows[:limit]
     return {
