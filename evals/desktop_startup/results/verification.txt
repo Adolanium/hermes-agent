@@ -1,0 +1,53 @@
+Verification on Windows 11, 2026-10-25
+
+Python tests always ran through scripts/run_tests.sh using Git Bash:
+
+  $env:HERMES_PYTHON = '<PM test environment>/Scripts/python.exe'
+  & 'C:/Program Files/Git/bin/bash.exe' scripts/run_tests.sh <files below> -q
+
+Files:
+  tests/hermes_cli/test_update_receipt_startup_cost.py
+  tests/hermes_cli/test_update_fleet_restart_pending.py
+  tests/hermes_cli/test_update_fleet_check_fail_closed.py
+  tests/hermes_cli/test_update_obligation_identity.py
+  tests/hermes_cli/test_update_external_checkout.py
+  tests/hermes_cli/test_update_scoped_reconciliation.py
+  tests/hermes_cli/test_update_system_dashboard_unit.py
+  tests/hermes_cli/test_manual_serve_deferral.py
+  tests/hermes_cli/test_update_receipt.py
+  tests/hermes_cli/test_update_receipt_scope.py
+  tests/hermes_cli/test_gateway_runtime_ensure.py
+  tests/hermes_cli/test_gateway_runtime_discovery.py
+
+Candidate: 12 files, 240 passed, 5 failed, 25 skipped, 29.1 seconds.
+Four passing cases are new; 236 passing cases are existing tests.
+All five failures are the existing parameterizations reasons3 through reasons7 of:
+  test_desktop_handoffs_add_the_gateway_hint_only_when_gateways_are_blamed
+  in test_update_system_dashboard_unit.py
+
+That entire file was repeated with update_cmd_fleet.py restored byte-for-byte
+from main. Result: 17 passed, the identical 5 failed, 4 skipped, 12.0 seconds.
+The failing POSIX-script assertions invoke bare "bash". Windows CreateProcess
+selects the System32 WSL launcher, even when shutil.which reports Git Bash on
+PATH. Explicit C:/Program Files/Git/bin/bash.exe is the Git Bash version. This
+pre-existing shell assumption was not changed by the performance patch.
+An OUT-forwarding probe succeeds with WSLENV=OUT, but run_tests.sh deliberately
+clears unlisted environment variables. Setting WSLENV before the runner still
+produces the same five failures. Neither the runner nor these tests was modified.
+
+An initial run used the worktree's in-tree .venv and additionally failed seven
+update tests. Their fake checkout roots triggered the real owning-install
+handoff. The existing PM test environment outside the checkout avoids that
+fixture/environment conflict: all 42 fleet-restart-pending tests pass there.
+The final 12-file run above uses that external environment. No dependencies
+were installed or modified to obtain this result.
+
+New test file on the base: 2 failed, 2 passed. Both failures are the no-evidence
+cases consulting the checkout. New test file on candidate: all 4 pass.
+
+Electron: all six measured batches passed, including their preparation pairs.
+48 real app launches accepted the expected draft with zero renderer errors.
+36 launches contributed to the reported medians; 12 preparation launches did not.
+The final two batches ran the committed evals/desktop_startup benchmark directly.
+
+Repository lint: python scripts/check --staged, all 12 checks passed.

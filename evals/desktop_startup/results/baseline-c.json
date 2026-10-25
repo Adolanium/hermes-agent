@@ -1,0 +1,84 @@
+{
+  "metadata": {
+    "label": "verification-baseline",
+    "node": "v24.22.1",
+    "platform": "win32",
+    "commit": "4ea8d23cc9f527332ccb1d55359b27741b6ea51b",
+    "sourceSha256": "3d1e9fcac0cc55d5c8a49d615f735d592228d3d05429ebf78c89199fa4f8fadf",
+    "sandbox": "C:\\Users\\Admin\\AppData\\Local\\Temp\\hermes-e2e-perf-loading-steady-0.600338025253431335ShMD"
+  },
+  "results": [
+    {
+      "repetition": -1,
+      "warmup": true,
+      "mode": "cold-gateway",
+      "windowMs": 1071.3777,
+      "connectedMs": 9696.5771,
+      "interactiveMs": 12434.7939,
+      "errors": []
+    },
+    {
+      "repetition": -1,
+      "warmup": true,
+      "mode": "warm-gateway",
+      "windowMs": 896.0283999999992,
+      "connectedMs": 2892.929699999999,
+      "interactiveMs": 4515.948900000001,
+      "errors": []
+    },
+    {
+      "repetition": 0,
+      "warmup": false,
+      "mode": "cold-gateway",
+      "windowMs": 856.6382000000012,
+      "connectedMs": 8787.202099999999,
+      "interactiveMs": 11456.914800000002,
+      "errors": []
+    },
+    {
+      "repetition": 0,
+      "warmup": false,
+      "mode": "warm-gateway",
+      "windowMs": 1074.7623999999996,
+      "connectedMs": 3471.350599999998,
+      "interactiveMs": 5061.2716999999975,
+      "errors": []
+    },
+    {
+      "repetition": 1,
+      "warmup": false,
+      "mode": "cold-gateway",
+      "windowMs": 859.8297999999995,
+      "connectedMs": 8932.4271,
+      "interactiveMs": 11068.034,
+      "errors": []
+    },
+    {
+      "repetition": 1,
+      "warmup": false,
+      "mode": "warm-gateway",
+      "windowMs": 888.5938999999998,
+      "connectedMs": 2925.5877000000037,
+      "interactiveMs": 4459.063000000002,
+      "errors": []
+    },
+    {
+      "repetition": 2,
+      "warmup": false,
+      "mode": "cold-gateway",
+      "windowMs": 895.3892999999953,
+      "connectedMs": 9548.988299999997,
+      "interactiveMs": 11687.272799999992,
+      "errors": []
+    },
+    {
+      "repetition": 2,
+      "warmup": false,
+      "mode": "warm-gateway",
+      "windowMs": 941.4024000000063,
+      "connectedMs": 3053.3782999999967,
+      "interactiveMs": 4605.843999999997,
+      "errors": []
+    }
+  ]
+}

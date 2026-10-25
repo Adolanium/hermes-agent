@@ -181,6 +181,11 @@ def _receipt_reports_stale_runtime(receipt: dict, expected_sha: str | None = Non
     from hermes_cli.update_cmd import _current_checkout_sha
     if not isinstance(receipt, dict):
         return False
+    fleet = receipt.get("fleet")
+    # With no post-restart fleet, only an unfinished receipt can carry evidence.
+    # Avoid refreshing live git provenance on every startup when there is none.
+    if not (isinstance(fleet, list) and fleet) and not _receipt_looks_unfinished(receipt):
+        return False
     expected_sha = expected_sha or _current_checkout_sha()
     if not expected_sha:
         return False
@@ -190,7 +195,6 @@ def _receipt_reports_stale_runtime(receipt: dict, expected_sha: str | None = Non
 
     from hermes_cli.update_receipt import row_is_external
 
-    fleet = receipt.get("fleet")
     if isinstance(fleet, list) and fleet:
         return any(
             isinstance(entry, dict)
@@ -199,8 +203,6 @@ def _receipt_reports_stale_runtime(receipt: dict, expected_sha: str | None = Non
             for entry in fleet
         )
 
-    if not _receipt_looks_unfinished(receipt):
-        return False
     plan = receipt.get("plan")
     if not isinstance(plan, dict):
         return False
