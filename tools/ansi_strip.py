@@ -45,7 +45,13 @@ _UNICODE_TAG_SUB_RE = re.compile(
 
 def strip_ansi(text: str) -> str:
     """Remove ANSI escape sequences; clean text passes through unchanged (fast path)."""
-    if not text or not _HAS_ESCAPE.search(text):
+    if not text:
+        return text
+    # ASCII cannot contain 8-bit C1 controls, so only ESC needs a scan.
+    if text.isascii():
+        if "\x1b" not in text:
+            return text
+    elif not _HAS_ESCAPE.search(text):
         return text
     return _ANSI_ESCAPE_RE.sub("", text)
 
@@ -78,6 +84,6 @@ def strip_unicode_tags(text: str) -> str:
     Returns the input unchanged (fast path) when no plane-14 tag characters are present. Ported from
     block/goose#10746.
     """
-    if not text or not _HAS_UNICODE_TAG.search(text):
+    if not text or text.isascii() or not _HAS_UNICODE_TAG.search(text):
         return text
     return _UNICODE_TAG_SUB_RE.sub(lambda m: m.group(1) or "", text)
