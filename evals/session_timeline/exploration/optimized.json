@@ -1,0 +1,216 @@
+{
+  "started_utc": "2026-10-25T06:02:42.578234+00:00",
+  "python": "3.14.9 (main, Oct 21 2026, 17:48:58) [MSC v.1944 64 bit (AMD64)]",
+  "sqlite": "3.53.1",
+  "cpu": "Intel(R) Core(TM) i7-10700K CPU @ 3.80GHz",
+  "os": "win32",
+  "architecture": "amd64",
+  "repeat": 5,
+  "benchmark_sha256": "f1e8ea3521538c273e69a5b889c8ab05e51d67a48cee3e48e900c56f9c17c113",
+  "source_sha256": "a9b512f0f71e31c5ffa3405008bf3175ab2fbf6ac44efb7a304da2e3aaa0469b",
+  "fixture": {
+    "indexed_messages": 6000,
+    "legacy_messages": 6000,
+    "synthetic_messages": 600
+  },
+  "results": {
+    "db_indexed_after_0": {
+      "calls_per_sample": 10,
+      "samples_ms": [
+        19.91993999981787,
+        20.094699997571297,
+        21.636159997433424,
+        19.386249998933636,
+        20.00621999904979
+      ],
+      "median_ms": 20.00621999904979,
+      "preview_calls_per_request": 600,
+      "output_sha256": "381216fc84fa532174a41e5c46525dc5d58023bd953a81e9c3705ceb50cfd7e5",
+      "returned": 500,
+      "pagination": {
+        "limit": 500,
+        "after_row_id": 0,
+        "returned": 500,
+        "total": 600,
+        "has_more": true,
+        "next_cursor": 4991
+      }
+    },
+    "db_indexed_after_5000": {
+      "calls_per_sample": 20,
+      "samples_ms": [
+        18.049814998812508,
+        17.02423000097042,
+        18.61792499985313,
+        18.98386500106426,
+        17.44196999934502
+      ],
+      "median_ms": 18.049814998812508,
+      "preview_calls_per_request": 600,
+      "output_sha256": "aa0044375e61a22453b48327328fbba888ad563f2584e5bda3dcf0c5f1c6dd0f",
+      "returned": 100,
+      "pagination": {
+        "limit": 500,
+        "after_row_id": 5000,
+        "returned": 100,
+        "total": 600,
+        "has_more": false,
+        "next_cursor": null
+      }
+    },
+    "db_indexed_after_6000": {
+      "calls_per_sample": 20,
+      "samples_ms": [
+        18.066990000079386,
+        18.53364499984309,
+        18.810089999169577,
+        27.781199998571537,
+        24.2358499992406
+      ],
+      "median_ms": 18.810089999169577,
+      "preview_calls_per_request": 600,
+      "output_sha256": "9d02feff80c7fc6c68c5cea713ad999983c94e99322ea41b36d81539ee9dfc79",
+      "returned": 0,
+      "pagination": {
+        "limit": 500,
+        "after_row_id": 6000,
+        "returned": 0,
+        "total": 600,
+        "has_more": false,
+        "next_cursor": null
+      }
+    },
+    "db_legacy_after_0": {
+      "calls_per_sample": 10,
+      "samples_ms": [
+        36.49981000053231,
+        33.97052999935113,
+        39.33973999810405,
+        33.81066000147257,
+        41.96656000276562
+      ],
+      "median_ms": 36.49981000053231,
+      "preview_calls_per_request": 600,
+      "output_sha256": "7c06dc9de9930e7625fc1b3450a4fc60f4cf706619c480caf9d02190e248d43f",
+      "returned": 500,
+      "pagination": {
+        "limit": 500,
+        "after_row_id": 0,
+        "returned": 500,
+        "total": 600,
+        "has_more": true,
+        "next_cursor": 10991
+      }
+    },
+    "db_legacy_after_12000": {
+      "calls_per_sample": 10,
+      "samples_ms": [
+        29.329420000431128,
+        30.32651000248734,
+        35.23384000000078,
+        34.07004000036977,
+        33.44441000081133
+      ],
+      "median_ms": 33.44441000081133,
+      "preview_calls_per_request": 600,
+      "output_sha256": "9203bc8d920aa097d3241049d3ec49a1521fa7f6ac039bf84c3d8dcfb1557430",
+      "returned": 0,
+      "pagination": {
+        "limit": 500,
+        "after_row_id": 12000,
+        "returned": 0,
+        "total": 600,
+        "has_more": false,
+        "next_cursor": null
+      }
+    },
+    "db_synthetic_after_0": {
+      "calls_per_sample": 50,
+      "samples_ms": [
+        6.019961999845691,
+        6.31338799954392,
+        7.207956000347622,
+        7.417692000162788,
+        6.354522000183351
+      ],
+      "median_ms": 6.354522000183351,
+      "preview_calls_per_request": 600,
+      "output_sha256": "a95208164cc68d7d133a9527c87918312f6e121448aa065ff7405bac7698e8ec",
+      "returned": 0,
+      "pagination": {
+        "limit": 500,
+        "after_row_id": 0,
+        "returned": 0,
+        "total": 0,
+        "has_more": false,
+        "next_cursor": null
+      }
+    },
+    "db_empty_after_0": {
+      "calls_per_sample": 1000,
+      "samples_ms": [
+        0.2965472000068985,
+        0.273390099988319,
+        0.2676807999960147,
+        0.2543119000038132,
+        0.258220399991842
+      ],
+      "median_ms": 0.2676807999960147,
+      "preview_calls_per_request": 0,
+      "output_sha256": "a95208164cc68d7d133a9527c87918312f6e121448aa065ff7405bac7698e8ec",
+      "returned": 0,
+      "pagination": {
+        "limit": 500,
+        "after_row_id": 0,
+        "returned": 0,
+        "total": 0,
+        "has_more": false,
+        "next_cursor": null
+      }
+    },
+    "http_indexed_after_0": {
+      "calls_per_sample": 10,
+      "samples_ms": [
+        33.9007100003073,
+        39.66630999930203,
+        39.526370001840405,
+        44.2498299991712,
+        46.66140000044834
+      ],
+      "median_ms": 39.66630999930203,
+      "preview_calls_per_request": 600,
+      "output_sha256": "e9be7b49d1bce18d5b8f1e4600315b5e6cb7b22211381acb47e01ea43171b825",
+      "returned": 500,
+      "pagination": {
+        "limit": 500,
+        "after_row_id": 0,
+        "returned": 500,
+        "total": 600,
+        "has_more": true,
+        "next_cursor": 4991
+      }
+    },
+    "http_indexed_after_6000": {
+      "calls_per_sample": 10,
+      "samples_ms": [
+        36.64753000193741,
+        33.79356000223197,
+        36.91869000031147,
+        32.50860999978613,
+        45.98511999938637
+      ],
+      "median_ms": 36.64753000193741,
+      "preview_calls_per_request": 600,
+      "output_sha256": "0d5e8dbfb01d82d998a58e08edbcc2753c49ffa5bf5fde51d52360363dac1f45",
+      "returned": 0,
+      "pagination": {
+        "limit": 500,
+        "after_row_id": 6000,
+        "returned": 0,
+        "total": 600,
+        "has_more": false,
+        "next_cursor": null
+      }
+    }
+  }
+}
