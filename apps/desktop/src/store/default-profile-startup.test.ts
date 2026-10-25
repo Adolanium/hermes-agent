@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { DesktopConnectionsRegistry, DesktopProfileRoute, HermesConnection } from '@/global'
+import type { DesktopConnectionsRegistry, DesktopProfileRoute } from '@/global'
 import { deferred } from '@/test/deferred'
+
+import type { HermesConnection } from '../../electron/ipc-contract'
 
 import { _resetConnectionsForTests, initializeConnectionsRegistry } from './connections'
 import { $defaultProfileRoute } from './default-profile'

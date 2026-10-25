@@ -1,7 +1,8 @@
 import { expect, it, vi } from 'vitest'
 
-import type { HermesConnection } from '@/global'
 import { $connection } from '@/store/session'
+
+import type { HermesConnection } from '../../electron/ipc-contract'
 
 import {
   getMediaImageDimensions,

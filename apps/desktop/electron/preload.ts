@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer, webFrame, webUtils } from 'electron'
 
 import type { DesktopProfileRoute } from './desktop-profile'
 import type { HudModifierApi, HudModifierStatus } from './hud-modifier-types'
+import { exposeDesktopIpc } from './ipc-contract'
 import { customWindowControlsEnabled } from './window-controls'
 
 // Which translucency the OS can back. Asked synchronously because the renderer
@@ -26,6 +27,7 @@ const localSkin = ipcRenderer.sendSync('hermes:skin:local')
 import { unwrapExpectedNotFound } from './api-expected-404'
 
 contextBridge.exposeInMainWorld('hermesDesktop', {
+  ...exposeDesktopIpc(ipcRenderer),
   glassSupported: translucencySupport?.glass === true,
   translucencySupported: translucencySupport?.translucency === true,
   // Launch-flag fact: the app was started with --local, so the renderer may
@@ -35,7 +37,6 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
   // onboarding treats this launch as a fresh install. Always false when packaged.
   assumeFreshInstall: launchFlags?.assumeFreshInstall === true,
   localSkin: localSkin && typeof localSkin === 'object' ? localSkin : null,
-  getConnection: (profile, opts) => ipcRenderer.invoke('hermes:connection', profile, opts),
   // Loopback origin that hosts YouTube's player for the file:// renderer.
   getEmbedHostOrigin: () => ipcRenderer.invoke('hermes:embed-host:origin'),
   // Registry-scoped backend resolution: { connectionId, profile } → descriptor.

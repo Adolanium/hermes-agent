@@ -1,12 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { HermesConnection } from '@/global'
 import { getSession } from '@/hermes'
 import { clearSessionDraft, stashSessionDraft } from '@/store/composer'
 import { $gatewaySwitching } from '@/store/gateway-switch'
 import { $activeGatewayProfile, $profiles } from '@/store/profile'
 import { $connection, $gatewayState, $sessions, setSessions } from '@/store/session'
 import { $sessionTiles, openSessionTile, reopenLastClosedTile, type SessionTile } from '@/store/session-states'
+
+import type { HermesConnection } from '../../../electron/ipc-contract'
 
 import {
   sessionTileResumeFailure,

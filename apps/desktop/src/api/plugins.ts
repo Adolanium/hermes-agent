@@ -1,7 +1,8 @@
 import { isStableOpen, reconnectBackoffDelayMs } from '@hermes/shared'
 
-import type { HermesConnection } from '@/global'
 import { RECONNECT_ATTEMPT_TIMEOUT_MS, withTimeout } from '@/lib/with-timeout'
+
+import type { HermesConnection } from '../../electron/ipc-contract'
 
 import { $apiRequestScope, getApiRequestConnection, getApiRequestProfile, hermesApi, profileScoped } from './client'
 

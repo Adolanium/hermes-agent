@@ -4,8 +4,10 @@ import { act, cleanup, fireEvent, render, renderHook, type RenderResult, screen 
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
-import type { HermesApiRequest, HermesConnection } from '@/global'
+import type { HermesApiRequest } from '@/global'
 import type { LocalCatalogModel, LocalModelsStatus, LocalRuntimeJob } from '@/types/hermes'
+
+import type { HermesConnection } from '../../electron/ipc-contract'
 
 vi.mock('@/hermes', async (): Promise<object> => ({
   ...(await import('@/api/local-models')),

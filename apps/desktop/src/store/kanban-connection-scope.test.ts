@@ -1,7 +1,7 @@
 import { QueryObserver } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { HermesConnection } from '@/global'
+import type { HermesConnection } from '../../electron/ipc-contract'
 
 // A connection switch must leave every profile-scoped query refetched against
 // the NEW gateway — see the $activeConnectionId.listen comment in

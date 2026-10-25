@@ -2,7 +2,6 @@ import { act, cleanup, render } from '@testing-library/react'
 import { useEffect, useRef } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { HermesConnection } from '@/global'
 import { getLatestSessionMessages, type SessionInfo } from '@/hermes'
 import { createClientSessionState } from '@/lib/chat-runtime'
 import * as gateways from '@/store/gateway'
@@ -10,6 +9,7 @@ import { $activeGatewayProfile, $showAllProfiles } from '@/store/profile'
 import { _resetSessionOwnerHintsForTests, getSessionOwnerHint, setConnection, setSessions } from '@/store/session'
 import { clearAllSessionStates, publishSessionState, requestForOwnedSession } from '@/store/session-states'
 
+import type { HermesConnection } from '../../../../../electron/ipc-contract'
 import type { ClientSessionState } from '../../../types'
 
 import { useSessionActions } from './index'

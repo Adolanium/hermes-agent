@@ -3,6 +3,18 @@
 The reasoning and worked detail behind the summarized sections of [`AGENTS.md`](./AGENTS.md). The
 rules themselves are in `AGENTS.md`, which agents load automatically; this file is read on purpose.
 
+## Typed native capabilities
+
+`electron/ipc-contract.ts` declares the `getConnection` and `getSyncStatus` channels and their
+argument and result types. Main registers handlers through each entry's `handle` method.
+Preload exposes the contract through `exposeDesktopIpc`, and `src/global.d.ts` derives the
+renderer methods from its return type. `HermesConnection` and `DesktopSyncReceipt` live with
+that contract; renderer modules import those types directly.
+
+Keep runtime imports in this module free of Node and Electron APIs because preload runs in
+Electron's sandbox. Other namespaces retain their existing bridges during migration.
+The version channel stays with the version-policy work in #139334 and #132379.
+
 ## Identity is not incidental
 
 Sessions have more than one identity, and conflating them is a recurring source

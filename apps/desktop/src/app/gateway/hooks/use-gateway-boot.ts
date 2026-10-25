@@ -13,7 +13,7 @@ import { canonicalOwnerProfile } from '@/api/canonical-protocol'
 import { createGatewayEventDedupe } from '@/app/gateway/gateway-event-dedupe'
 import { reportStartupLatency } from '@/app/gateway/report-startup-latency'
 import { shouldApplyPostBootProgressError } from '@/components/boot-failure-reauth'
-import type { DesktopBootProgress, HermesConnection, HermesWindowState } from '@/global'
+import type { DesktopBootProgress, HermesWindowState } from '@/global'
 import { HermesGateway } from '@/hermes'
 import { translateNow } from '@/i18n'
 import { desktopDefaultCwd } from '@/lib/desktop-fs'
@@ -103,6 +103,8 @@ import {
 } from '@/store/session-states'
 import { warnIfTerminalBackendUnavailable } from '@/store/terminal-backend-warning'
 import { isPeerInstanceWindow, windowProfileOverride } from '@/store/windows'
+
+import type { HermesConnection } from '../../../../electron/ipc-contract'
 
 import { stashGatewaySurvivor, survivorIsStale, takeGatewaySurvivor } from './gateway-hmr-survivor'
 import { useConnectionsRegistry } from './use-connections-registry'

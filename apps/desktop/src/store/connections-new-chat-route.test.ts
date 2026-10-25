@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
-import type { DesktopConnectionsRegistry, HermesConnection } from '@/global'
+import type { DesktopConnectionsRegistry } from '@/global'
 import type * as Hermes from '@/hermes'
 
+import type { HermesConnection } from '../../electron/ipc-contract'
 import { deferred } from '../test/deferred'
 
 vi.mock('@/app/contrib/hooks/use-background-sync', () => ({ resetLiveRuntimeTracking: vi.fn() }))

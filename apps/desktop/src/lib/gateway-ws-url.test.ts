@@ -1,7 +1,7 @@
 import { GatewayReauthRequiredError, isGatewayReauthRequired, resolveGatewayWsUrl } from '@hermes/shared'
 import { describe, expect, it, vi } from 'vitest'
 
-import type { HermesConnection } from '@/global'
+import type { HermesConnection } from '../../electron/ipc-contract'
 
 import { resolveDesktopGatewayWsUrl } from './gateway-ws-url'
 

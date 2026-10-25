@@ -5,6 +5,7 @@ import type { TranslucencyState } from '@hermes/shared/translucency'
 import type { ChallengeOutcome } from '../electron/challenge-window'
 import type { ScreenshotApi } from '../electron/command-screenshot-types'
 import type { HudModifierApi } from '../electron/hud-modifier-types'
+import type { DesktopIpcApi, HermesConnection } from '../electron/ipc-contract'
 import type { MachineProfile } from '../electron/machine-profile'
 import type { HermesNotification } from '../electron/notification-types'
 import type { KeepAwakeMode } from '../electron/power-save'
@@ -32,11 +33,7 @@ export type DesktopMachineProfile = MachineProfile
 
 declare global {
   interface Window {
-    hermesDesktop: {
-      // Resolve a backend connection. Omit `profile` (or pass the primary) for
-      // the window's backend; pass a named profile to dial/reuse that profile's
-      // cached gateway descriptor.
-      getConnection: (profile?: string | null) => Promise<HermesConnection>
+    hermesDesktop: DesktopIpcApi & {
       // Registry-scoped backend resolution: dial (connectionId, profile). An
       // empty/local connectionId delegates to the legacy getConnection path.
       getConnectionFor?: (payload: {
@@ -494,11 +491,6 @@ declare global {
       /** LOCAL `<HERMES_HOME>/logs` of `profile` (default: the active Desktop
        *  profile) — error card "Open Logs". */
       logsRoot?: (profile?: string) => Promise<string>
-      // Local AGENT-plugin root (<HERMES_HOME>/plugins), same Electron-local
-      // resolution. The disk door also scans it for `<name>/desktop/plugin.js`
-      // so one agent-plugin package can ship a desktop UI half. Optional:
-      // older Electron shells predate it — the scanner then skips this root.
-      agentPluginsRoot?: () => Promise<string>
       // Rename a file/folder in place (new base name, same parent dir).
       renamePath?: (path: string, newName: string) => Promise<{ path: string }>
       // Write a small UTF-8 text file (hardened path, parent must exist).
@@ -657,10 +649,6 @@ declare global {
       onBootstrapEvent: (callback: (payload: DesktopBootstrapEvent) => void) => () => void
       getVersion: (scope?: { connectionId?: string; profile?: string }) => Promise<DesktopVersionInfo>
       getMachineProfile?: () => Promise<DesktopMachineProfile>
-      /** The latest pm/venv/plugin-operation receipt (machine-readable):
-       *  bisect disables, failed rebuilds, update-check results. null when
-       *  no venv operation has run yet. */
-      getSyncStatus: () => Promise<DesktopSyncReceipt | null>
       /** Restart the app in place — loads the swapped bundle when bundleSwapPending. */
       relaunchApp?: () => Promise<void>
       getRemoteDisplayReason?: () => Promise<string | null>
@@ -755,36 +743,6 @@ export interface HermesTerminalSession {
 export interface HermesTerminalExit {
   code: number | null
   signal: string | null
-}
-
-/** The pm receipt shape (pm/receipt.py schema 1) — one machine-readable
- *  surface for venv rebuilds, plugin bisects, and update checks. Fields
- *  are optional-typed: older/newer receipts may lack sections; readers
- *  must degrade gracefully (the derive-* module does). */
-export interface DesktopSyncReceipt {
-  schema?: number
-  kind?: string
-  outcome?: string
-  exit_code?: number
-  started_at?: string
-  finished_at?: string
-  steps?: Array<{ name: string; ok: boolean; detail?: string; at?: string }>
-  venv_rebuild?: { ok: boolean; reason?: string } | null
-  pm_sync_outcome?: string
-  pm_steps?: DesktopSyncReceipt['steps']
-  pm_venv_rebuild?: DesktopSyncReceipt['venv_rebuild']
-  pm_plugin_bisect?: DesktopSyncReceipt['plugin_bisect']
-  plugin_bisect?: Array<{ plugin: string; action: string; reason: string }>
-  plugin_checks?: Array<{
-    name: string
-    class?: string
-    current?: string | null
-    latest?: string | null
-    update_available?: boolean | null
-    needs_fixing?: string | null
-    reason?: string
-  }>
-  feature_list?: string[] | null
 }
 
 export interface DesktopVersionInfo {
@@ -1011,48 +969,6 @@ export interface DesktopPluginProfileRoute {
   primary?: true
   profile: string
   targetProfile: string
-}
-
-export interface HermesConnection {
-  baseUrl: string
-  customWindowControls?: boolean
-  darwinMajor?: number
-  isFullscreen: boolean
-  isMaximized?: boolean
-  // The live, RESOLVED connection mode. Only ever 'local' or 'remote' — a
-  // 'cloud' saved-config entry resolves to a 'remote' connection under the hood
-  // (cloud-auto-discovery Q3/Q6), so this never carries 'cloud'.
-  mode?: 'local' | 'remote'
-  // 'native': this machine's gateway; no static token, per-call private grants.
-  authMode?: 'native' | 'oauth' | 'token'
-  remoteHost?: string
-  remoteIdentity?: string
-  remoteKind?: 'cloud' | 'ssh' | 'url'
-  remoteHermesVersion?: string
-  nativeOverlayWidth: number
-  source?: 'env' | 'local' | 'settings'
-  token: string
-  wsUrl: string
-  logs: string[]
-  // Set for pool (non-primary) backends so the renderer knows which profile a
-  // connection belongs to.
-  profile?: string
-  // The registry connection this descriptor resolves to. Registry-scoped
-  // secondaries carry it directly; legacy primary remotes preserve it from
-  // their selected stored route before dialing.
-  connectionId?: string
-  // True only when getConnectionFor explicitly resolved a v2 registry route.
-  // An inferred connectionId identifies the visible source but its v1 profile
-  // name may still be a client-side routing alias rather than a backend profile.
-  registryScoped?: boolean
-  // True only when `profile` is a request scope on the shared primary backend.
-  // A pooled backend also carries `profile`, so presence alone cannot identify
-  // the shared-primary routing case.
-  sharedPrimary?: boolean
-  // True when `profile` is a request scope on a SHARED registry remote/cloud
-  // backend (one host, many profiles) — the registry analogue of sharedPrimary.
-  sharedRemote?: boolean
-  windowButtonPosition: { x: number; y: number } | null
 }
 
 export interface HermesTitleBarTheme {

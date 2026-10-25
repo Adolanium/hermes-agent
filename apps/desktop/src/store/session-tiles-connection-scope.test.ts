@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { HermesConnection } from '@/global'
+import type { HermesConnection } from '../../electron/ipc-contract'
 
 import { $activeGatewayProfile } from './profile'
 import { $selectedStoredSessionId, setConnection } from './session'

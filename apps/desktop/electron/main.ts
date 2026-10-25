@@ -321,6 +321,7 @@ import { buildHudWindowUrl } from './hud-url'
 import { linuxOzoneBackend, resolveHudWindowing } from './hud-windowing'
 import { INSTALL_STAMP, installShape } from './install-stamp'
 import type { InstallStamp } from './install-stamp'
+import { desktopIpc } from './ipc-contract'
 import { createKeepAwakeController } from './keep-awake-controller'
 import { applyLaunchProfileOverride } from './launch-profile'
 import { fetchLinkTitle, resolveFaviconCached } from './link-metadata'
@@ -14112,7 +14113,7 @@ function createWindow() {
   })
 }
 
-ipcMain.handle('hermes:connection', async (event, profile) => {
+desktopIpc.getConnection.handle(ipcMain, async (event, profile) => {
   const route = resolveDesktopConnectionRequest(
     profile,
     windowConnectionRoutes.get(event.sender.id),
@@ -17326,8 +17327,7 @@ ipcMain.handle('hermes:app:relaunch', async () => {
 
 /** The latest pm/venv/plugin-operation receipt — the machine-readable
  *  surface every medium reads (CLI: `hermes pm status`). Returned as one
- *  parsed JSON object: { kind, outcome, venv_rebuild, plugin_bisect,
- *  plugin_checks, ... } or null when no operation has run yet. The file
+ *  parsed JSON object, or null when no operation has run yet. The file
  *  lives at <HERMES_HOME>/logs/update_receipts/latest.json — written by
  *  pm syncs (bisect disables, failed rebuilds), plugin update checks,
  *  and (embedded) updates. */
@@ -17345,7 +17345,7 @@ function readLatestSyncReceipt(): Record<string, unknown> | null {
   }
 }
 
-ipcMain.handle('hermes:sync-status', () => readLatestSyncReceipt())
+desktopIpc.getSyncStatus.handle(ipcMain, () => readLatestSyncReceipt())
 
 // Python's Path.resolve() equivalent for install-id derivation: realpath when
 // the path exists, plain resolve otherwise. Must stay byte-compatible with

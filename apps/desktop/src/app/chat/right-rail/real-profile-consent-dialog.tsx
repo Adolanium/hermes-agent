@@ -11,7 +11,6 @@ import {
   DialogHeader,
   DialogTitle
 } from '@/components/ui/dialog'
-import type { HermesConnection } from '@/global'
 import { saveHermesConfigRecord } from '@/hermes'
 import { useI18n } from '@/i18n'
 import { Check, Globe } from '@/lib/icons'
@@ -25,6 +24,7 @@ import {
 } from '@/store/real-profile-consent'
 import { $connection } from '@/store/session'
 
+import type { HermesConnection } from '../../../../electron/ipc-contract'
 import { hermesConfigCacheWriter, useHermesConfigRecord } from '../../hooks/use-config-record'
 
 interface RealProfileConsentDialogProps {

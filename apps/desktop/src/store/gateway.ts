@@ -11,7 +11,6 @@ import {
 import { atom } from 'nanostores'
 
 import { canonicalOwnerProfile } from '@/api/canonical-protocol'
-import type { HermesConnection } from '@/global'
 import { HermesGateway, setApiRequestConnection } from '@/hermes'
 import { translateNow } from '@/i18n'
 import {
@@ -33,7 +32,8 @@ import { markNativeNotifyBaseline } from '@/store/notify-baseline'
 import { setConnection, setGatewayState } from '@/store/session'
 import { stampSecondaryProfileOwner } from '@/store/session-event-provenance'
 
-// ── Multi-profile gateway routing ──────────────────────────────────────────
+import type { HermesConnection } from '../../electron/ipc-contract'
+
 // Concurrent sessions across profiles need concurrent sockets: the renderer's
 // event handler is already session-keyed, so the only thing stopping two
 // profiles streaming at once was the single swapping socket. We keep that one

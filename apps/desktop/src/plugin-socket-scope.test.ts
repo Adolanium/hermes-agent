@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { HermesConnection } from '@/global'
+import type { HermesConnection } from '../electron/ipc-contract'
 
 // pluginSocket must dial the ACTIVE gateway's backend — resolved through the
 // same (connectionId, profile) source of truth ensureGatewayProfile /

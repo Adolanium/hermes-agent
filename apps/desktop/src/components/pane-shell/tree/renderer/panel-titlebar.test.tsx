@@ -1,9 +1,10 @@
 import { act, cleanup, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { HermesConnection } from '@/global'
 import { $connection } from '@/store/session'
 import { stubResizeObserver } from '@/test/jsdom'
+
+import type { HermesConnection } from '../../../../../electron/ipc-contract'
 
 import { usePanelTitlebar } from './panel-titlebar'
 

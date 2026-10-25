@@ -4,7 +4,6 @@ import { atom, computed } from 'nanostores'
 import { setApiRequestLocalMode } from '@/api/client'
 import { lastVisibleMessageIsUser } from '@/app/chat/thread-loading'
 import type { ContextSuggestion } from '@/app/types'
-import type { HermesConnection } from '@/global'
 import type { ChatMessage } from '@/lib/chat-messages'
 import {
   activeConnectionScopeSuffix,
@@ -15,6 +14,8 @@ import { isMessagingSource } from '@/lib/session-source'
 import type { TileSessionFocusStamp } from '@/lib/session-timer-since'
 import { persistBoolean, persistString, readJson, storedBoolean, storedString, writeJson } from '@/lib/storage'
 import type { SessionInfo, UsageStats } from '@/types/hermes'
+
+import type { HermesConnection } from '../../electron/ipc-contract'
 
 import { $removedSessionIds, isSessionRemovalPending, tombstoneRowIds } from './session-removal'
 import type { SessionOwnerRoute, SessionOwnerScope } from './session-request-router'

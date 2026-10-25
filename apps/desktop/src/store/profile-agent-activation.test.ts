@@ -1,8 +1,7 @@
 import { atom } from 'nanostores'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { HermesConnection } from '@/global'
-
+import type { HermesConnection } from '../../electron/ipc-contract'
 import { deferred } from '../test/deferred'
 
 // Registry-agent activation (ensureGatewayAgent — the SDK ensureAgent door).

@@ -1,6 +1,6 @@
 import { resolveGatewayWsUrl } from '@hermes/shared'
 
-import type { HermesConnection } from '@/global'
+import type { HermesConnection } from '../../electron/ipc-contract'
 
 export function resolveDesktopGatewayWsUrl(
   desktop: Window['hermesDesktop'],

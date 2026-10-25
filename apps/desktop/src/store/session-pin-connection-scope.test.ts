@@ -1,9 +1,10 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { HermesConnection } from '@/global'
 import { connectionScopeSuffix } from '@/lib/connection-scoped'
 import { readKey, storedStringArray, writeKey } from '@/lib/storage'
 import type { SessionInfo } from '@/types/hermes'
+
+import type { HermesConnection } from '../../electron/ipc-contract'
 
 const patch = vi.fn<(id: string, pinned: boolean, profile?: null | string) => Promise<{ ok: boolean }>>(() =>
   Promise.resolve({ ok: true })

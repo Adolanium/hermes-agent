@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 
-import type { HermesConnection } from '@/global'
 import { readKey } from '@/lib/storage'
+
+import type { HermesConnection } from '../../electron/ipc-contract'
 
 import { $pinnedSessionIds, $sidebarSessionOrderIds, $sidebarSessionOrderManual, pinSession } from './layout'
 import { getRememberedSessionId, setConnection, setRememberedSessionId } from './session'

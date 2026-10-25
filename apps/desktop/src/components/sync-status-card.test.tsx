@@ -1,7 +1,7 @@
 import { act, cleanup, render, screen } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 
-import type { DesktopSyncReceipt } from '@/global'
+import type { DesktopSyncReceipt } from '../../electron/ipc-contract'
 
 import { SyncStatusCard } from './sync-status-card'
 

@@ -1,7 +1,6 @@
 import { LOCAL_CONNECTION_ID, registryBackendScopeKey } from '@hermes/shared'
 import { atom, batch, computed } from 'nanostores'
 
-import type { HermesConnection } from '@/global'
 import { getProfiles, hermesApi, setApiRequestProfile, STARTUP_REQUEST_TIMEOUT_MS } from '@/hermes'
 import { sortByProfileOrder as sortProfilesByOrder } from '@/lib/profile-order'
 import { invalidateProfileScopedQueries } from '@/lib/query-client'
@@ -32,6 +31,8 @@ import { $connection, clearComposerSelectionOwner, setComposerSelectionOwner, se
 import type { SessionOwnerRoute } from '@/store/session-request-router'
 import { reloadOpenStarmapGraph, resetStarmapGraph } from '@/store/starmap'
 import type { ProfileInfo } from '@/types/hermes'
+
+import type { HermesConnection } from '../../electron/ipc-contract'
 
 // Canonical key for a profile: trimmed, empty → "default". Used everywhere we
 // compare a session's owning profile against the live gateway's profile.

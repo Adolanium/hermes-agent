@@ -3,8 +3,9 @@
 // self-accept so this module's own reload doesn't reset the cache. Prod strips
 // import.meta.hot → byte-for-byte unchanged live unmount.
 
-import type { HermesConnection } from '@/global'
 import type { HermesGateway } from '@/hermes'
+
+import type { HermesConnection } from '../../../../electron/ipc-contract'
 
 export interface GatewaySurvivor {
   gateway: HermesGateway

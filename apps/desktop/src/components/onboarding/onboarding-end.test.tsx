@@ -1,7 +1,6 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { HermesConnection } from '@/global'
 import { writeKey } from '@/lib/storage'
 import { $localModelOfferPending, LOCAL_MODEL_PENDING_KEY } from '@/store/local-model-offer'
 import { $localSetupEligibility } from '@/store/local-setup-offer'
@@ -9,6 +8,8 @@ import { markOnboardingDecided } from '@/store/onboarding-presence'
 import { $onboardingSettleFrom } from '@/store/onboarding-run'
 import { $connection } from '@/store/session'
 import type { LocalCatalogModel } from '@/types/hermes'
+
+import type { HermesConnection } from '../../../electron/ipc-contract'
 
 import { OnboardingEnd } from './onboarding-end'
 

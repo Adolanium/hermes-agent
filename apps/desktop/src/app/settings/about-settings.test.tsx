@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { DesktopUpdateStatus, DesktopVersionInfo, HermesConnection } from '@/global'
+import type { DesktopUpdateStatus, DesktopVersionInfo } from '@/global'
 import { en } from '@/i18n/en'
 import { $confirmRequest, settleConfirm } from '@/store/confirm'
 import type * as SessionStore from '@/store/session'
@@ -18,6 +18,8 @@ import {
   startActiveUpdate,
   type UpdateApplyState
 } from '@/store/updates'
+
+import type { HermesConnection } from '../../../electron/ipc-contract'
 
 import { AboutSettings } from './about-settings'
 

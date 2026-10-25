@@ -2,9 +2,11 @@ import { atom } from 'nanostores'
 import { afterEach, expect, it, vi } from 'vitest'
 
 import { setApiRequestConnection } from '@/api/client'
-import type { DesktopAgentRoster, HermesConnection } from '@/global'
+import type { DesktopAgentRoster } from '@/global'
 import { $fleetRoster, _resetFleetRosterForTests } from '@/store/fleet-roster'
 import type { ProfileInfo } from '@/types/hermes'
+
+import type { HermesConnection } from '../../electron/ipc-contract'
 
 vi.mock('@/store/gateway', () => ({ $gateway: atom(null) }))
 vi.mock('@/lib/query-client', () => ({ invalidateProfileScopedQueries: vi.fn() }))

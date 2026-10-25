@@ -2,13 +2,14 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { HermesConnection } from '@/global'
 import {
   $realProfilePromptClaim,
   $realProfilePromptDismissed,
   $realProfilePromptMuted
 } from '@/store/real-profile-consent'
 import { $connection } from '@/store/session'
+
+import type { HermesConnection } from '../../../../electron/ipc-contract'
 
 import { RealProfileConsentDialog, shouldOfferRealProfilePrompt } from './real-profile-consent-dialog'
 

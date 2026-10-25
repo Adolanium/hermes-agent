@@ -8,15 +8,7 @@ import { atom } from 'nanostores'
 
 import { CANONICAL_GATEWAY_PROTOCOL } from '@/api/canonical-protocol'
 import { connectionScoped, profileScoped } from '@/api/client'
-import type {
-  DesktopUpdateApplyOptions,
-  DesktopUpdateApplyResult,
-  DesktopUpdateProgress,
-  DesktopUpdateStage,
-  DesktopUpdateStatus,
-  DesktopVersionInfo,
-  HermesConnection
-} from '@/global'
+import type { DesktopUpdateApplyOptions, DesktopUpdateApplyResult, DesktopUpdateProgress, DesktopUpdateStage, DesktopUpdateStatus, DesktopVersionInfo } from '@/global'
 import { checkHermesUpdate, getActionStatus, updateHermes } from '@/hermes'
 import { translateNow } from '@/i18n'
 import { persistString, storedString } from '@/lib/storage'
@@ -25,6 +17,8 @@ import { reconnectGateway } from '@/store/gateway-reconnect'
 import { dismissNotification, notify } from '@/store/notifications'
 import { $connection } from '@/store/session'
 import type { BackendUpdateCheckResponse, UpdateReceiptSummary } from '@/types/hermes'
+
+import type { HermesConnection } from '../../electron/ipc-contract'
 
 /** Keyed per retired-channel revision: a new retirement (or a revision bump on
  *  the same channel) re-shows the notice, a plain re-check never does. */

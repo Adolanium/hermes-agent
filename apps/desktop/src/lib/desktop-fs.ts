@@ -1,13 +1,9 @@
 import { hermesApi } from '@/api/client'
-import type {
-  HermesConnection,
-  HermesReadDirResult,
-  HermesReadFileErrorResult,
-  HermesReadFileTextResult,
-  HermesSelectPathsOptions
-} from '@/global'
+import type { HermesReadDirResult, HermesReadFileErrorResult, HermesReadFileTextResult, HermesSelectPathsOptions } from '@/global'
 import { translateNow } from '@/i18n'
 import { $connection } from '@/store/session'
+
+import type { HermesConnection } from '../../electron/ipc-contract'
 
 export interface DesktopFsRemotePicker {
   selectPaths: (options?: HermesSelectPathsOptions) => Promise<string[]>

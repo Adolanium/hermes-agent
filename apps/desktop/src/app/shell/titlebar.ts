@@ -1,4 +1,4 @@
-import type { HermesConnection } from '@/global'
+import type { HermesConnection } from '../../../electron/ipc-contract'
 
 export const TITLEBAR_HEIGHT = 34
 /** Permanent native drag target beside a top-edge tab strip. */

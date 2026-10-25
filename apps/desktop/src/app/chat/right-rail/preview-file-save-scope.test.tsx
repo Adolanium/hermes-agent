@@ -7,8 +7,10 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { expect, it, vi } from 'vitest'
 
 import { setApiRequestConnection, setApiRequestProfile } from '@/api/client'
-import type { HermesApiRequest, HermesConnection } from '@/global'
+import type { HermesApiRequest } from '@/global'
 import { $connection } from '@/store/session'
+
+import type { HermesConnection } from '../../../../electron/ipc-contract'
 
 import { LocalFilePreview } from './preview-file'
 

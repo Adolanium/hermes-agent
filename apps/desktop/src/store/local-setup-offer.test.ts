@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { HermesConnection } from '@/global'
 import type * as Hermes from '@/hermes'
 import type { LocalCatalogModel, LocalModelsStatus } from '@/types/hermes'
+
+import type { HermesConnection } from '../../electron/ipc-contract'
 
 const backend = vi.hoisted(() => ({ catalog: vi.fn(), status: vi.fn() }))
 

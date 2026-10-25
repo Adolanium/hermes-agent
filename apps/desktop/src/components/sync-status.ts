@@ -5,7 +5,7 @@
  * to show' rather than throwing at the UI boundary.
  */
 
-import type { DesktopSyncReceipt } from '@/global'
+import type { DesktopSyncReceipt } from '../../electron/ipc-contract'
 
 /** One actionable line per surface: what needs attention + why. */
 export interface SyncStatusSummary {
