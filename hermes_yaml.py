@@ -12,6 +12,16 @@ from ruamel.yaml.error import YAMLError
 from ruamel.yaml.resolver import VersionedResolver
 
 
+class _Yaml(YAML):
+    # Installed extension paths are process-wide; parser/emitter state stays per operation.
+    _plugin_paths: tuple[str, ...] | None = None
+
+    def official_plug_ins(self) -> list[str]:
+        if _Yaml._plugin_paths is None:
+            _Yaml._plugin_paths = tuple(super().official_plug_ins())
+        return list(_Yaml._plugin_paths)
+
+
 class _Yaml11Resolver(VersionedResolver):
     # Quote strings like "off" without adding a %YAML directive to every config/snippet.
     @property
@@ -20,7 +30,7 @@ class _Yaml11Resolver(VersionedResolver):
 
 
 def _load(document: str | bytes, *, pure: bool) -> Any:
-    yaml = YAML(typ="safe", pure=pure)
+    yaml = _Yaml(typ="safe", pure=pure)
     yaml.version = (1, 1)
     return yaml.load(document)
 
@@ -63,7 +73,7 @@ def safe_dump(
 ) -> str | None:
     """Write standard YAML data with readable Unicode and indented block lists."""
     # The C emitter ignores sequence offsets and escapes astral Unicode.
-    yaml = YAML(typ="safe", pure=True)
+    yaml = _Yaml(typ="safe", pure=True)
     yaml.Resolver = _Yaml11Resolver
     yaml.default_flow_style = default_flow_style
     yaml.allow_unicode = allow_unicode
@@ -88,7 +98,7 @@ ROUNDTRIP_YAML_WIDTH = 2**31 - 1
 
 def roundtrip_yaml() -> YAML:
     """Create a fresh comment/quote-preserving editor for user-authored YAML."""
-    yaml = YAML(typ="rt")
+    yaml = _Yaml(typ="rt")
     yaml.width = ROUNDTRIP_YAML_WIDTH
     yaml.Resolver = _Yaml11Resolver
     yaml.preserve_quotes = True
