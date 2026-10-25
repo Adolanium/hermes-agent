@@ -1,0 +1,301 @@
+{
+  "python": "3.14.9 (main, Oct 21 2026, 17:48:58) [MSC v.1944 64 bit (AMD64)]",
+  "os": "win32",
+  "architecture": "amd64",
+  "cpu": "Intel(R) Core(TM) i7-10700K CPU @ 3.80GHz",
+  "started_utc": "2026-10-25T05:46:53.381589+00:00",
+  "repeat": 7,
+  "benchmark_sha256": "6a8b195a1ad2ae254677a8f52e4f1ab8a40a8afde1d1693dfed76dfa36cebe11",
+  "source_sha256": "71f339d1be720c24f407565b4a90cb55164dead2e860cf438258104fd96c1922",
+  "results": {
+    "ansi_ascii_80": {
+      "input_characters": 80,
+      "input_sha256": "cc33ce8311cc6de6b1c3b29508ef8716858f6aa6d57c783aa592b888173ddeae",
+      "output_characters": 80,
+      "output_sha256": "cc33ce8311cc6de6b1c3b29508ef8716858f6aa6d57c783aa592b888173ddeae",
+      "calls_per_sample": 500000,
+      "median_ms": 0.0005656207999563776,
+      "samples_ms": [
+        0.0005683036000118591,
+        0.0005653538000187836,
+        0.0005656207999563776,
+        0.0005633013999904506,
+        0.0005635237999958917,
+        0.0005665809999918565,
+        0.0005665142000070773
+      ]
+    },
+    "ansi_ascii_16384": {
+      "input_characters": 16384,
+      "input_sha256": "d476528c8872a4be09826ac5cc7de545fbb6858a8cf23e071caa46ba4bdb8bce",
+      "output_characters": 16384,
+      "output_sha256": "d476528c8872a4be09826ac5cc7de545fbb6858a8cf23e071caa46ba4bdb8bce",
+      "calls_per_sample": 5000,
+      "median_ms": 0.06803760000038891,
+      "samples_ms": [
+        0.06789261999656446,
+        0.06784348000073806,
+        0.06788985999883153,
+        0.07133542000083253,
+        0.06803760000038891,
+        0.06833976000198164,
+        0.06842642000410706
+      ]
+    },
+    "ansi_ascii_1048576": {
+      "input_characters": 1048576,
+      "input_sha256": "dcf2640c315d363aa549fd56888a237c531bacbaf0e8c92ec77fe305f5f2340e",
+      "output_characters": 1048576,
+      "output_sha256": "dcf2640c315d363aa549fd56888a237c531bacbaf0e8c92ec77fe305f5f2340e",
+      "calls_per_sample": 50,
+      "median_ms": 4.359448000323027,
+      "samples_ms": [
+        4.351471999543719,
+        4.4365540001308545,
+        4.359448000323027,
+        4.994578000041656,
+        4.323781999992207,
+        4.952792000258341,
+        4.34666000015568
+      ]
+    },
+    "ansi_unicode_16384": {
+      "input_characters": 16384,
+      "input_sha256": "5a0b49ee6970171e85e14ae2fa6646d02e534a8e744f0bd2f52ea81c30918e13",
+      "output_characters": 16384,
+      "output_sha256": "5a0b49ee6970171e85e14ae2fa6646d02e534a8e744f0bd2f52ea81c30918e13",
+      "calls_per_sample": 2000,
+      "median_ms": 0.09671615000115708,
+      "samples_ms": [
+        0.10156999999890104,
+        0.09688919999462087,
+        0.09661350000533275,
+        0.09671615000115708,
+        0.09626484999898821,
+        0.09646930001326837,
+        0.10278240000479855
+      ]
+    },
+    "tags_ascii_80": {
+      "input_characters": 80,
+      "input_sha256": "cc33ce8311cc6de6b1c3b29508ef8716858f6aa6d57c783aa592b888173ddeae",
+      "output_characters": 80,
+      "output_sha256": "cc33ce8311cc6de6b1c3b29508ef8716858f6aa6d57c783aa592b888173ddeae",
+      "calls_per_sample": 500000,
+      "median_ms": 0.0005081880000070669,
+      "samples_ms": [
+        0.0006344364000251516,
+        0.0005081880000070669,
+        0.0005107866000034847,
+        0.0004965418000356294,
+        0.0005716768000274897,
+        0.0004918686000164598,
+        0.0004890431999810971
+      ]
+    },
+    "tags_ascii_16384": {
+      "input_characters": 16384,
+      "input_sha256": "d476528c8872a4be09826ac5cc7de545fbb6858a8cf23e071caa46ba4bdb8bce",
+      "output_characters": 16384,
+      "output_sha256": "d476528c8872a4be09826ac5cc7de545fbb6858a8cf23e071caa46ba4bdb8bce",
+      "calls_per_sample": 5000,
+      "median_ms": 0.054482899996219206,
+      "samples_ms": [
+        0.05423623999813572,
+        0.054482899996219206,
+        0.05463155999896117,
+        0.05566918000113219,
+        0.05387274000095203,
+        0.05357083999551833,
+        0.05676499999826774
+      ]
+    },
+    "tags_ascii_1048576": {
+      "input_characters": 1048576,
+      "input_sha256": "dcf2640c315d363aa549fd56888a237c531bacbaf0e8c92ec77fe305f5f2340e",
+      "output_characters": 1048576,
+      "output_sha256": "dcf2640c315d363aa549fd56888a237c531bacbaf0e8c92ec77fe305f5f2340e",
+      "calls_per_sample": 50,
+      "median_ms": 3.5574639996048063,
+      "samples_ms": [
+        3.599705999949947,
+        3.648399999947287,
+        3.458680000039749,
+        3.5574639996048063,
+        3.7907139997696504,
+        3.4651979996124282,
+        3.438311999780126
+      ]
+    },
+    "tags_unicode_16384": {
+      "input_characters": 16384,
+      "input_sha256": "5a0b49ee6970171e85e14ae2fa6646d02e534a8e744f0bd2f52ea81c30918e13",
+      "output_characters": 16384,
+      "output_sha256": "5a0b49ee6970171e85e14ae2fa6646d02e534a8e744f0bd2f52ea81c30918e13",
+      "calls_per_sample": 5000,
+      "median_ms": 0.055678540002554656,
+      "samples_ms": [
+        0.056184519996168095,
+        0.05572079999838024,
+        0.062632839998696,
+        0.054737340001156556,
+        0.054440760001307355,
+        0.05426475999993272,
+        0.055678540002554656
+      ]
+    },
+    "ansi_colored_1048576": {
+      "input_characters": 1048576,
+      "input_sha256": "532f6b1402c820b16a94a9fe91ceff0f36c5d4966b10e505cd2a35882ba3adf5",
+      "output_characters": 685610,
+      "output_sha256": "c9fab9210103d3ecf49d5b8bcf4c79a4077ad31472cfd7f00f369a5a976a5f93",
+      "calls_per_sample": 10,
+      "median_ms": 23.26306000177283,
+      "samples_ms": [
+        21.715549999498762,
+        23.26306000177283,
+        22.228119999635965,
+        24.839560000691563,
+        24.252510000951588,
+        23.319039997295476,
+        22.061600000597537
+      ]
+    },
+    "ansi_late_escape_1048576": {
+      "input_characters": 1048588,
+      "input_sha256": "f181775beea3704d62c758f9269c5fcc4cd04c6cfb4e4767d2f734218cc519d1",
+      "output_characters": 1048579,
+      "output_sha256": "c8f189efdac181c0d743f76e46e634018f67d75e700a35406cb8f0464a77c86a",
+      "calls_per_sample": 20,
+      "median_ms": 16.068329999689013,
+      "samples_ms": [
+        16.068329999689013,
+        16.375559999141842,
+        16.19457000051625,
+        15.842214999429416,
+        15.789390000281855,
+        15.93070500093745,
+        18.538559999433346
+      ]
+    },
+    "ansi_c1_16384": {
+      "input_characters": 16394,
+      "input_sha256": "645766b765f0ed3d4780f10cc450000d4b7a3817c0fb315c9d1a0771bd4246a2",
+      "output_characters": 16387,
+      "output_sha256": "b36c01db9251039b096331062779427aa3fba82f31c45b9d78d7754b8e32259a",
+      "calls_per_sample": 1000,
+      "median_ms": 0.24675419999402948,
+      "samples_ms": [
+        0.24675419999402948,
+        0.24564189999364316,
+        0.24448559997836128,
+        0.2445847000053618,
+        0.2471308000094723,
+        0.2523858999775257,
+        0.2552529000095092
+      ]
+    },
+    "tags_orphan_16384": {
+      "input_characters": 16386,
+      "input_sha256": "740e7b8cfacf0a4ea0d7239b6d10b3edbf06bca1def525e9de065578203d68ea",
+      "output_characters": 16384,
+      "output_sha256": "d476528c8872a4be09826ac5cc7de545fbb6858a8cf23e071caa46ba4bdb8bce",
+      "calls_per_sample": 1000,
+      "median_ms": 0.3011586999928113,
+      "samples_ms": [
+        0.344442200002959,
+        0.3011586999928113,
+        0.30212929999106564,
+        0.29937679998693056,
+        0.3010344999784138,
+        0.3035510999907274,
+        0.3002353000047151
+      ]
+    },
+    "tags_flag_16384": {
+      "input_characters": 16391,
+      "input_sha256": "0079f40144e5e3cc6cf8aef8d67e07fd2e512e218039b48ed29e23dfd9528f76",
+      "output_characters": 16391,
+      "output_sha256": "0079f40144e5e3cc6cf8aef8d67e07fd2e512e218039b48ed29e23dfd9528f76",
+      "calls_per_sample": 1000,
+      "median_ms": 0.31541310000466183,
+      "samples_ms": [
+        0.31287900000461377,
+        0.3085125999932643,
+        0.3162076000007801,
+        0.346642000018619,
+        0.31541310000466183,
+        0.31597060000058264,
+        0.3100648999970872
+      ]
+    },
+    "display_ascii_16384": {
+      "input_characters": 16384,
+      "input_sha256": "d476528c8872a4be09826ac5cc7de545fbb6858a8cf23e071caa46ba4bdb8bce",
+      "output_characters": 16384,
+      "output_sha256": "d476528c8872a4be09826ac5cc7de545fbb6858a8cf23e071caa46ba4bdb8bce",
+      "calls_per_sample": 5000,
+      "median_ms": 0.05390163999982178,
+      "samples_ms": [
+        0.05390163999982178,
+        0.05568337999866344,
+        0.0536564800015185,
+        0.05456563999759965,
+        0.0540212000021711,
+        0.05360236000269651,
+        0.05361517999554053
+      ]
+    },
+    "mcp_resource_ascii_16384": {
+      "input_characters": 16384,
+      "input_sha256": "d476528c8872a4be09826ac5cc7de545fbb6858a8cf23e071caa46ba4bdb8bce",
+      "output_characters": 16384,
+      "output_sha256": "d476528c8872a4be09826ac5cc7de545fbb6858a8cf23e071caa46ba4bdb8bce",
+      "calls_per_sample": 5000,
+      "median_ms": 0.05383819999988191,
+      "samples_ms": [
+        0.05362584000104107,
+        0.05408076000167057,
+        0.053604679997079074,
+        0.05416719999630004,
+        0.05383556000306271,
+        0.054836899996735154,
+        0.05383819999988191
+      ]
+    },
+    "mcp_resource_ascii_1048576": {
+      "input_characters": 1048576,
+      "input_sha256": "dcf2640c315d363aa549fd56888a237c531bacbaf0e8c92ec77fe305f5f2340e",
+      "output_characters": 1048576,
+      "output_sha256": "dcf2640c315d363aa549fd56888a237c531bacbaf0e8c92ec77fe305f5f2340e",
+      "calls_per_sample": 100,
+      "median_ms": 3.4087800001725554,
+      "samples_ms": [
+        3.401921000040602,
+        3.698906000063289,
+        3.7758329999633133,
+        3.3958240001811646,
+        3.55715700017754,
+        3.4087800001725554,
+        3.396830999990925
+      ]
+    },
+    "code_output_ascii_16384": {
+      "input_characters": 16384,
+      "input_sha256": "d476528c8872a4be09826ac5cc7de545fbb6858a8cf23e071caa46ba4bdb8bce",
+      "output_characters": 16384,
+      "output_sha256": "d476528c8872a4be09826ac5cc7de545fbb6858a8cf23e071caa46ba4bdb8bce",
+      "calls_per_sample": 1000,
+      "median_ms": 0.22500200002104975,
+      "samples_ms": [
+        0.22867409998434596,
+        0.2235680999874603,
+        0.22313619998749346,
+        0.2265283000015188,
+        0.23046990000875667,
+        0.22500200002104975,
+        0.22316930000670254
+      ]
+    }
+  }
+}
