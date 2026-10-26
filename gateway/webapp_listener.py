@@ -226,6 +226,11 @@ class BrowserCredentialError(OSError):
     """The Webapp's browser credential cannot be stored in the home; ``str()`` names the file and why."""
 
 
+class PartialSignOutError(BrowserCredentialError):
+    """Sign-out dropped the native sign-ins but could not replace the browser credential, so browsers
+    stay signed in; ``str()`` says so, then names the file and why."""
+
+
 def browser_session_token(home, *, rotate: bool = False) -> str:
     """The dashboard session token a Webapp browser holds, kept user-only in *home*.
 
@@ -262,13 +267,20 @@ def sign_out_stored_credential(home) -> str:
     credential in use (``browser_credential.rotate``). The record goes first because a native app's
     requests are bound to the credential they were checked under (``hermes_cli.webapp_sign_in``). A
     listener that failed to start replaces the credential alone (:func:`browser_session_token`): that
-    is not a sign-out, and native apps signed in there work again when it serves. Raises OSError
-    (:class:`BrowserCredentialError` for the credential) when a file cannot be changed; when the
-    record cannot be removed, nothing has changed."""
+    is not a sign-out, and native apps signed in there work again when it serves. Raises OSError,
+    having changed nothing, when the record cannot be removed; :class:`BrowserCredentialError` when
+    the credential cannot be stored, :class:`PartialSignOutError` if a record was dropped first."""
     from hermes_cli.webapp_sign_in import revoke
 
-    revoke(home)
-    return browser_session_token(home, rotate=True)
+    dropped = revoke(home)
+    try:
+        return browser_session_token(home, rotate=True)
+    except BrowserCredentialError as exc:
+        if not dropped:
+            raise
+        raise PartialSignOutError(
+            "Native apps that signed in on the Webapp's listener were signed out, but the browser credential "
+            f"could not be replaced, so browsers stay signed in: {exc}") from exc
 
 
 def _readable_by_other_users(path: Path) -> bool:
@@ -354,7 +366,9 @@ def register_control_verbs(runner, home, server=None, *, links_checked: bool | N
     ``webapp-sign-out`` replaces the browser credential, which also ends every login bound to it
     behind the sign-in gate and every native app's sign-in on the Webapp's listener, closes the
     sockets those opened, and reports how many it closed; ``native_apps_signed_out`` tells a newer CLI
-    that native apps were signed out too (a gateway older than that leaves them signed in).
+    that native apps were signed out too (a gateway older than that leaves them signed in). When it
+    signs native apps out but cannot replace the credential, it fails with :class:`PartialSignOutError`,
+    which says so: a newer CLI prints that alone, an older one after "Nobody was signed out:".
 
     *links_checked* is whether such a link can be checked here; None asks this host
     (:func:`_one_use_links_work`) at each launch. Tests pass False to take the printed-link path on
@@ -441,7 +455,12 @@ def register_control_verbs(runner, home, server=None, *, links_checked: bool | N
         # every request of a native app's sign-in, so those browsers and apps are signed out and their
         # sockets close too. Native clients that authenticated with a gateway grant never held the
         # credential and stay connected.
-        ended = browser_credential.rotate(sign_out_stored_credential(home))
+        try:
+            credential = sign_out_stored_credential(home)
+        except PartialSignOutError as exc:
+            # The old credential stays in use, so every socket opened under it stays open too.
+            raise PartialSignOutError(f"{exc}. No connection was closed.") from exc
+        ended = browser_credential.rotate(credential)
         return {"signed_out": True, "serving": True,
                 "sign_in_gate": bool(getattr(web.app.state, "auth_required", False)),
                 "connections_closed": ended.get("sockets", 0), "native_apps_signed_out": True}

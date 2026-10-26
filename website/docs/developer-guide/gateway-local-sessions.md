@@ -63,7 +63,7 @@ The server issues `session:operator` only at these existing trusted boundaries:
   native app's RFC 8252 sign-in (digests kept in `webapp/native-sign-in-tokens.json` in the gateway home until they
   expire). A restart keeps that record. Sign-out drops it, then replaces the session token; each request
   such a token made was checked under the session token in use, so the sockets it opened and the tickets
-  it minted end with the logins'.
+  it minted end with the logins'. A loopback code minted before a sign-out redeems nothing after it.
 - The HTTP mutation gate, after a verified dashboard Session, native HTTP owner grant,
   or permitted legacy session token has been accepted.
 

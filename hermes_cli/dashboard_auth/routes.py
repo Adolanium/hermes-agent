@@ -53,6 +53,7 @@ router = APIRouter()
 
 _NO_STORE = {"Cache-Control": "no-store, no-cache, must-revalidate"}
 _NATIVE_EXPIRED_DETAIL = "Native login expired or unknown; restart sign-in."
+_CODE_INVALID = "Invalid or expired authorization code."
 
 
 def _http(status_code: int, detail: str) -> HTTPException:
@@ -127,10 +128,13 @@ def _bearer_payload(session: Session) -> dict[str, Any]:
 def _finish_native_login(
     request: Request, *, broker_state: str, session: Session, provider: str) -> str:
     """Mint the one-time loopback code and return the desktop's ``redirect_uri?code=…&state=…``.
-    No session cookies on the native path — the desktop redeems at ``/auth/native/token``."""
+    No session cookies on the native path — the desktop redeems at ``/auth/native/token``. On the
+    gateway's Webapp behind the gate the code is bound to the sign-in state read before it is minted,
+    so a sign-out before the desktop redeems it ends this sign-in (``webapp_sign_in``)."""
+    binding = webapp_sign_in.native_code_binding(request)
     try:
         pending = native_flow.get_pending(broker_state)
-        gw_code = native_flow.complete_pending(broker_state, session=session)
+        gw_code = native_flow.complete_pending(broker_state, session=session, binding=binding)
     except native_flow.NativeFlowError:
         _audit(request, AuditEvent.NATIVE_TOKEN_FAILURE, provider=provider,
                reason="pending_not_found")
@@ -586,13 +590,16 @@ class _NativeTokenBody(BaseModel):
 async def auth_native_token(request: Request, body: _NativeTokenBody):
     """Exchange a loopback gateway code + PKCE verifier for bearer tokens. The code is consumed
     on every path (no verifier oracle, no replay); any failure is a generic 400. Tokens go in
-    the JSON body; no cookie is set."""
+    the JSON body; no cookie is set. On the gateway's Webapp behind the gate a code minted before a
+    sign-out gets the same 400."""
     try:
-        session = native_flow.redeem_code(code=body.code, code_verifier=body.code_verifier)
+        session, binding = native_flow.redeem_code(code=body.code, code_verifier=body.code_verifier)
     except native_flow.CodeInvalid:
         _audit(request, AuditEvent.NATIVE_TOKEN_FAILURE, reason="invalid_code_or_pkce")
-        raise _http(400, "Invalid or expired authorization code.")
-    webapp_sign_in.gave_native_app(request, session)
+        raise _http(400, _CODE_INVALID)
+    if not webapp_sign_in.gave_native_app(request, session, minted_under=binding):
+        _audit(request, AuditEvent.NATIVE_TOKEN_FAILURE, reason="signed_out")
+        raise _http(400, _CODE_INVALID)
     _audit(request, AuditEvent.NATIVE_TOKEN_SUCCESS, provider=session.provider,
            user_id=session.user_id)
     return _bearer_payload(session)

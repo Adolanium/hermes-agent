@@ -210,7 +210,7 @@ def _signed_out_summary(result: dict) -> str:
 
 
 def _sign_out(target: Path) -> int:
-    from gateway.webapp_listener import sign_out_stored_credential
+    from gateway.webapp_listener import PartialSignOutError, sign_out_stored_credential
     for attempt in range(_START_WAIT_ATTEMPTS + 1):
         try:
             response = _control(target, "webapp-sign-out")
@@ -219,6 +219,9 @@ def _sign_out(target: Path) -> int:
         if response is not None and response.get("ok"):
             print(_signed_out_summary(response.get("result") or {}))
             return 0
+        if response is not None and str(response.get("error") or "").startswith(f"{PartialSignOutError.__name__}: "):
+            print(_refusal(response))  # who was signed out, who was not, and why
+            return 1
         state = _gateway_state(target)
         if response is None and state == "absent":
             # No gateway is running: drop the native sign-ins the Webapp's listener recorded and replace
@@ -226,6 +229,9 @@ def _sign_out(target: Path) -> int:
             # Behind the sign-in gate, logins bound to the credential end too.
             try:
                 sign_out_stored_credential(target)
+            except PartialSignOutError as exc:  # native apps were signed out, browsers were not
+                print(exc)
+                return 1
             except OSError as exc:  # names the file and why
                 print(f"Nobody was signed out: {exc}")
                 return 1

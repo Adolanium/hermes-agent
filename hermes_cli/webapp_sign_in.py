@@ -33,6 +33,15 @@ tickets it mints and the sockets it opens end at sign-out the same way. Sign-out
 credential being replaced, and one checked after it no longer works alone, in this process or after a
 restart. Nothing is revoked at the provider (the bundled password provider cannot revoke its tokens);
 sign-out ends them on this listener.
+
+A sign-in the user finished before a sign-out ends with it, even when the app redeems its loopback code
+afterwards. Before the code is minted, :func:`native_code_binding` reads the generation of the credential
+in use and how many sign-outs have dropped the home's record; :func:`gave_native_app` records the pair
+the code redeems only while both are unchanged. The credential alone is not enough: sign-out drops the
+record before it replaces the credential, so a code redeemed between the two would pass that check and
+its pair would be recorded after the drop. The count alone is not enough either: a code minted between
+the two was minted under the old credential, as a login finished then is bound to it and ends. A sign-in
+finished after the sign-out is a new one and works.
 """
 from __future__ import annotations
 
@@ -63,6 +72,8 @@ _records_lock = threading.Lock()
 #: Per gateway home: token digest -> expiry in Unix seconds. Read from the home's file once per
 #: process; this process is its only writer.
 _records: dict[Optional[Path], dict[str, int]] = {}
+#: Per gateway home: how many sign-outs have dropped its record in this process (:func:`revoke`).
+_sign_outs: dict[Optional[Path], int] = {}
 
 
 def binding(token: str) -> str:
@@ -137,13 +148,27 @@ def token_works_alone(request: Request, token: str) -> bool:
     return works
 
 
-def gave_native_app(request: Request, session, *, renewing: Optional[str] = None) -> bool:
+def native_code_binding(request: Request) -> Optional[tuple[str, int]]:
+    """What the loopback code a native app's sign-in on *request* is about to mint is bound to: the
+    generation of the browser credential in use and how many sign-outs the home has had, read before
+    the code exists; None off the Webapp's gate. :func:`gave_native_app` takes it back at redemption."""
+    if not applies(request):
+        return None
+    with _records_lock:
+        return browser_credential.generation(), _sign_outs.get(_home(request), 0)
+
+
+def gave_native_app(request: Request, session, *, minted_under: Optional[tuple[str, int]] = None,
+                    renewing: Optional[str] = None) -> bool:
     """Record that this listener just gave *session*'s tokens to a native app's sign-in, so they work
     on their own on the gateway's Webapp behind the gate (:func:`token_works_alone`).
 
-    For a renewal, *renewing* is the refresh token renewed. When sign-out dropped it while the
-    provider ran, nothing is recorded and this returns False: the caller hands the pair out to no
-    one, as the gate renews a login's binding only while its credential is in use (:func:`renew`)."""
+    Nothing is recorded, and this returns False so the caller hands the pair out to no one, when a
+    sign-out came first. For a loopback code, *minted_under* is its :func:`native_code_binding`: a
+    sign-out since the code was minted refuses it, as it ends a login finished before it. For a
+    renewal, *renewing* is the refresh token renewed: a sign-out that dropped it while the provider
+    ran refuses it, as the gate renews a login's binding only while its credential is in use
+    (:func:`renew`). Both are checked under the lock :func:`revoke` holds while it drops the record."""
     if not applies(request):
         return True
     now = int(time.time())
@@ -152,7 +177,7 @@ def gave_native_app(request: Request, session, *, renewing: Optional[str] = None
     home = _home(request)
     with _records_lock:
         records = _loaded(home)
-        if renewing is not None and not _recorded(records, renewing, now):
+        if not _no_sign_out_since(home, records, now, minted_under=minted_under, renewing=renewing):
             return False
         for token, expires in given:
             if token:
@@ -164,22 +189,41 @@ def gave_native_app(request: Request, session, *, renewing: Optional[str] = None
     return True
 
 
-def revoke(home: Path) -> None:
+def revoke(home: Path) -> bool:
     """Drop the native sign-ins recorded for gateway home *home*: the tokens this listener gave native
-    apps no longer work on their own, in this process or after a restart. Sign-out runs it before it
-    replaces the browser credential (module docstring). Raises OSError, having dropped nothing, when
-    the record is there but cannot be removed: a sign-out that leaves it would be undone by a restart."""
+    apps no longer work on their own, in this process or after a restart, and no loopback code minted
+    before now redeems anything. Sign-out runs it before it replaces the browser credential (module
+    docstring). Returns whether there was a record to drop. Raises OSError, having dropped nothing,
+    when the record is there but cannot be removed: a sign-out that leaves it would be undone by a
+    restart."""
     home = Path(home)
     path = home / RECORD_PATH
     with _records_lock:
         try:
             path.unlink()
-        except (FileNotFoundError, NotADirectoryError):  # nothing recorded there
-            pass
+        except (FileNotFoundError, NotADirectoryError):  # no file; this process may still hold some
+            dropped = bool(_records.get(home))
         except OSError as exc:
             raise OSError(f"could not remove {path}, the Webapp's record of native sign-ins "
                           f"({exc.strerror or exc})") from exc
+        else:
+            dropped = True
         _records[home] = {}
+        _sign_outs[home] = _sign_outs.get(home, 0) + 1
+    return dropped
+
+
+def _no_sign_out_since(home: Optional[Path], records: dict[str, int], now: float, *,
+                       minted_under: Optional[tuple[str, int]], renewing: Optional[str]) -> bool:
+    """Whether no sign-out came before the pair :func:`gave_native_app` is about to record (call with
+    ``_records_lock`` held). A code minted off the Webapp's gate carries no binding and redeems nothing
+    on it."""
+    if renewing is not None:
+        return _recorded(records, renewing, now)
+    if minted_under is None:
+        return False
+    generation, sign_outs = minted_under
+    return browser_credential.is_current(generation) and sign_outs == _sign_outs.get(home, 0)
 
 
 def _recorded(records: dict[str, int], token: str, now: float) -> bool:
@@ -243,3 +287,4 @@ def _reset_for_tests() -> None:
     """Forget every loaded record, as a new process starts with only the files."""
     with _records_lock:
         _records.clear()
+        _sign_outs.clear()

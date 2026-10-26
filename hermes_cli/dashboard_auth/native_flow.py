@@ -7,7 +7,8 @@ so the gateway brokers: authorization server *to the desktop*, OAuth client
 stashes a pending entry (:func:`register_pending`) keyed by an opaque
 ``broker_state`` riding in the gateway's own PKCE cookie -> upstream callback
 or password login mints a one-time code bound to cc_d (:func:`complete_pending`)
--> desktop redeems it with cv_d at ``/auth/native/token`` (:func:`redeem_code`).
+-> desktop redeems it with cv_d at ``/auth/native/token`` (:func:`redeem_code`), which hands back
+the session and whatever the caller bound the code to when it was minted.
 PKCE binding, single use, short TTLs, 256-bit handles compared in constant time,
 no secret logging; in-memory, process-local, ``time.time`` patchable in tests.
 """
@@ -21,7 +22,7 @@ import secrets
 import threading
 import time
 from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 from hermes_cli.dashboard_auth.base import Session
 
@@ -51,6 +52,7 @@ class _IssuedCode:
     code_challenge: str  # cc_d — verified against cv_d at redemption
     session: Session
     expires_at: int
+    binding: Any = None  # the caller's, from complete_pending; handed back by redeem_code
 
 
 _pending: dict[str, _Pending] = {}  # broker_state -> _Pending
@@ -126,9 +128,10 @@ def get_pending(broker_state: str, *, now: Optional[int] = None) -> _Pending:
         return _pop_pending_locked(broker_state, consume=False)
 
 
-def complete_pending(broker_state: str, *, session: Session, now: Optional[int] = None) -> str:
+def complete_pending(broker_state: str, *, session: Session, binding: Any = None,
+                     now: Optional[int] = None) -> str:
     """Consume a pending authorization (single use) and mint a one-time gateway code bound to the
-    desktop's challenge + ``session``."""
+    desktop's challenge + ``session``. :func:`redeem_code` hands *binding* back with the session."""
     now = _now(now)
     with _lock:
         _gc_locked(now)
@@ -138,13 +141,14 @@ def complete_pending(broker_state: str, *, session: Session, now: Optional[int] 
         gw_code = secrets.token_urlsafe(32)
         _issued[gw_code] = _IssuedCode(
             code_challenge=pending.code_challenge, session=session,
-            expires_at=now + _CODE_TTL_SECONDS)
+            expires_at=now + _CODE_TTL_SECONDS, binding=binding)
     return gw_code
 
 
-def redeem_code(*, code: str, code_verifier: str, now: Optional[int] = None) -> Session:
-    """Verify PKCE + consume a gateway code; return the bound :class:`Session`. The entry is popped
-    BEFORE the PKCE check so a wrong verifier cannot be retried (no oracle, no replay)."""
+def redeem_code(*, code: str, code_verifier: str, now: Optional[int] = None) -> tuple[Session, Any]:
+    """Verify PKCE + consume a gateway code; return the bound :class:`Session` and the binding
+    :func:`complete_pending` minted it with. The entry is popped BEFORE the PKCE check so a wrong
+    verifier cannot be retried (no oracle, no replay)."""
     now = _now(now)
     with _lock:
         _gc_locked(now)
@@ -155,7 +159,7 @@ def redeem_code(*, code: str, code_verifier: str, now: Optional[int] = None) -> 
         raise CodeInvalid("code expired")
     if not hmac.compare_digest(issued.code_challenge, _s256(code_verifier)):
         raise CodeInvalid("PKCE verification failed")
-    return issued.session
+    return issued.session, issued.binding
 
 
 def _reset_for_tests() -> None:

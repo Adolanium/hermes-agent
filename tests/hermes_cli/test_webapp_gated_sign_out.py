@@ -9,9 +9,10 @@ tokens those cookies hold work only as those cookies: the Webapp's listener refu
 token, on the refresh route and as a socket's ``?token=``, before and after sign-out and across a
 restart. Signing in again works. A native app's own sign-in on the same listener (RFC 8252) works on
 its own and survives a restart that does not sign out; sign-out ends it as it ends a login: its tokens
-stop working on their own, after a restart too, a renewal sign-out overtakes hands out nothing, and the
-sockets it opened close. The standalone dashboard has no browser credential and keeps its logins as on
-main.
+stop working on their own, after a restart too, a renewal sign-out overtakes hands out nothing, a
+loopback code minted before sign-out redeems nothing after it, and the sockets it opened close. A
+sign-out that cannot replace the credential says that it signed out native apps only. The standalone
+dashboard has no browser credential and keeps its logins as on main.
 """
 import json
 from types import SimpleNamespace
@@ -75,8 +76,8 @@ SIGN_INS = {"password": _sign_in_with_password, "oauth": _sign_in_with_oauth}
 
 
 @pytest.fixture
-def sign_out(gated, tmp_path):
-    """Ask the gateway serving *gated* for ``webapp-sign-out`` over its control socket."""
+def control(gated, tmp_path):
+    """The control socket of the gateway serving *gated*: asks it for a verb, returns its answer."""
     from gateway.control_socket import GatewayControlServer
     from gateway.webapp_listener import register_control_verbs
 
@@ -87,9 +88,17 @@ def sign_out(gated, tmp_path):
         session_api=SimpleNamespace(app=SimpleNamespace(web=gated.server)))
     register_control_verbs(runner, home)
 
+    def ask(verb):
+        raw = json.dumps({"protocol": 1, "verb": verb, "id": 1, "params": {}}).encode()
+        return json.loads(runner.session_control_server.handle_request_line(raw, "same-user"))
+    return ask
+
+
+@pytest.fixture
+def sign_out(gated, control):
+    """Ask the gateway serving *gated* for ``webapp-sign-out`` over its control socket."""
     def ask():
-        raw = json.dumps({"protocol": 1, "verb": "webapp-sign-out", "id": 1, "params": {}}).encode()
-        answer = json.loads(runner.session_control_server.handle_request_line(raw, "same-user"))
+        answer = control("webapp-sign-out")
         assert answer["ok"], answer
         assert gated.server._SESSION_TOKEN != _TOKEN
         return answer["result"]
@@ -411,24 +420,39 @@ def test_a_login_after_sign_out_works(gated, sign_out, clock):
     assert browser.post("/api/webapp/socket-ticket?socket=host-terminal").status_code == 200
 
 
-def _native_app_sign_in(gated):
-    """An RFC 8252 sign-in (the native Desktop's) on the Webapp's listener: authorize in the system
-    browser, then redeem the loopback code for bearer tokens. No cookie login takes part."""
+NATIVE_VERIFIER = "native-app-verifier-" + "v" * 40
+
+
+def _start_native_sign_in(gated):
+    """The start of an RFC 8252 sign-in (the native Desktop's) on the Webapp's listener: the system
+    browser opens ``/auth/native/authorize``. Returns the step that finishes it, where the user signs in
+    and the browser lands on the app's loopback redirect; that step returns the one-use code."""
     import base64
     import hashlib
     from urllib.parse import parse_qs, urlsplit
 
-    verifier = "native-app-verifier-" + "v" * 40
-    challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
+    challenge = base64.urlsafe_b64encode(hashlib.sha256(NATIVE_VERIFIER.encode()).digest()).rstrip(b"=").decode()
     system_browser = gated.browser()
     started = system_browser.get("/auth/native/authorize", follow_redirects=False, params={
         "provider": "stub", "code_challenge": challenge, "code_challenge_method": "S256",
         "redirect_uri": "http://127.0.0.1:53999/cb", "state": "desk"})
     callback = parse_qs(urlsplit(started.headers["location"]).query)
-    landed = system_browser.get("/auth/callback", follow_redirects=False,
-                                params={"code": callback["code"][0], "state": callback["state"][0]})
-    code = parse_qs(urlsplit(landed.headers["location"]).query)["code"][0]
-    tokens = gated.browser().post("/auth/native/token", json={"code": code, "code_verifier": verifier})
+
+    def finish():
+        landed = system_browser.get("/auth/callback", follow_redirects=False,
+                                    params={"code": callback["code"][0], "state": callback["state"][0]})
+        return parse_qs(urlsplit(landed.headers["location"]).query)["code"][0]
+    return finish
+
+
+def _redeem(gated, code):
+    """The app redeems its loopback *code* for bearer tokens. No cookie login takes part."""
+    return gated.browser().post("/auth/native/token", json={"code": code, "code_verifier": NATIVE_VERIFIER})
+
+
+def _native_app_sign_in(gated):
+    """A whole RFC 8252 sign-in on the Webapp's listener; returns the app's access and refresh token."""
+    tokens = _redeem(gated, _start_native_sign_in(gated)())
     assert tokens.status_code == 200
     return tokens.json()["access_token"], tokens.json()["refresh_token"]
 
@@ -517,6 +541,89 @@ def test_a_native_request_while_sign_out_replaces_the_credential_is_refused(gate
     monkeypatch.setattr(browser_credential, "_revokers", {"probe": a_native_request, **browser_credential._revokers})
     sign_out()
     _refused(during[0])
+
+
+def test_a_native_sign_in_finished_before_sign_out_ends_with_it(gated, sign_out):
+    """The user finished a native app's sign-in (the system browser landed on the app's loopback
+    redirect) just before the owner signed out, and the app redeems its code afterwards: it gets the
+    answer any bad code gets, as a browser login finished before sign-out ends with it. A sign-in the
+    user started before sign-out and finished after it is a new one, and works."""
+    finished_before = _start_native_sign_in(gated)()
+    started_before = _start_native_sign_in(gated)
+    sign_out()
+    refused, bad = _redeem(gated, finished_before), _redeem(gated, "never-minted")
+    assert refused.status_code == bad.status_code == 400 and refused.json() == bad.json()
+    tokens = _redeem(gated, started_before())
+    assert tokens.status_code == 200, tokens.text
+    assert gated.browser().get("/api/auth/me", headers=_bearer(tokens.json()["access_token"])).status_code == 200
+    assert _renew(gated, tokens.json()["refresh_token"]).status_code == 200
+
+
+def test_a_sign_out_that_lands_while_a_native_code_is_minted_ends_that_sign_in(gated, sign_out, monkeypatch):
+    """What a loopback code is bound to is read before the code exists, so a code whose minting a
+    sign-out overtakes still counts as minted before it and redeems nothing."""
+    from hermes_cli.dashboard_auth import native_flow
+
+    mint = native_flow.complete_pending
+
+    def overtaken_by_sign_out(*args, **kwargs):
+        sign_out()
+        return mint(*args, **kwargs)
+
+    finish = _start_native_sign_in(gated)
+    monkeypatch.setattr(native_flow, "complete_pending", overtaken_by_sign_out)
+    code = finish()
+    assert _redeem(gated, code).status_code == 400
+
+
+def test_no_native_sign_in_gets_through_while_sign_out_replaces_the_credential(gated, sign_out, monkeypatch):
+    """Sign-out drops the native sign-ins, then stores the new credential and puts it in use. In
+    between, while the old credential is still in use, a code minted before the sign-out is redeemed
+    for nothing (its pair would be recorded after the drop and outlive the sign-out), and a sign-in the
+    user finishes then was finished under the old credential, so its code redeems nothing after the
+    sign-out, as a browser login finished then is bound to the old credential and ends."""
+    from gateway import webapp_listener
+
+    minted_before = _start_native_sign_in(gated)()
+    finish = _start_native_sign_in(gated)
+    store = webapp_listener.browser_session_token
+    during = {}
+
+    def store_the_new_credential(home, *, rotate=False):
+        during["redeemed"] = _redeem(gated, minted_before)
+        during["minted"] = finish()
+        return store(home, rotate=rotate)
+
+    monkeypatch.setattr(webapp_listener, "browser_session_token", store_the_new_credential)
+    sign_out()
+    assert during["redeemed"].status_code == 400, during["redeemed"].text
+    after = _redeem(gated, during["minted"])
+    assert after.status_code == 400, after.text
+
+
+def test_a_sign_out_that_cannot_replace_the_credential_says_it_signed_out_native_apps_only(
+        gated, control, monkeypatch, tmp_path, capsys):
+    """Sign-out drops the native sign-ins first. When it then cannot store the new credential (a folder
+    where its file goes), native apps are signed out and browsers are not, and no connection closes:
+    ``hermes webapp --sign-out`` says that, names the file and fails. A native app can sign in again."""
+    from gateway.webapp_listener import TOKEN_PATH
+    from hermes_cli import webapp_launcher as launcher
+
+    access, refresh = _native_app_sign_in(gated)
+    browser = gated.browser()
+    _sign_in_with_password(browser)
+    token_path = tmp_path / ".hermes" / TOKEN_PATH
+    token_path.unlink(missing_ok=True)
+    token_path.mkdir(parents=True)
+    monkeypatch.setattr(launcher, "_control", lambda _home, verb, params=None: control(verb))
+    assert launcher._sign_out(tmp_path / ".hermes") == 1
+    out = capsys.readouterr().out
+    assert out.startswith("Native apps that signed in on the Webapp's listener were signed out, but")
+    assert "browsers stay signed in" in out and str(token_path) in out and "No connection was closed." in out
+    assert gated.server._SESSION_TOKEN == _TOKEN
+    assert browser.get("/api/auth/me").status_code == 200
+    _refused_alone(gated, access, refresh)
+    _native_app_sign_in(gated)
 
 
 def test_replacing_the_stored_credential_without_sign_out_keeps_native_tokens(gated, monkeypatch, tmp_path):

@@ -355,6 +355,25 @@ def test_signing_out_with_no_gateway_and_a_record_that_cannot_be_removed_says_no
     assert (world["root"] / TOKEN_PATH).read_text().strip() == before
 
 
+def test_signing_out_with_no_gateway_and_a_credential_that_cannot_be_replaced_says_native_apps_were(world, capsys):
+    """Sign-out drops the record of native sign-ins first. When the stored credential then cannot be
+    replaced (a folder where its file goes), native apps are signed out and browsers are not: it says
+    both, names the file, and fails."""
+    from gateway.webapp_listener import TOKEN_PATH
+    from hermes_cli.webapp_sign_in import RECORD_PATH
+    record = world["root"] / RECORD_PATH
+    record.parent.mkdir(parents=True)
+    record.write_text('{"abc": 9999999999}\n', encoding="utf-8")
+    (world["root"] / TOKEN_PATH).mkdir()
+    world["answers"]["webapp-sign-out"] = launcher.GatewayUnreachable("no gateway")
+    assert launcher.cmd_webapp(_args(sign_out=True)) == 1
+    out = capsys.readouterr().out
+    assert not record.exists()
+    assert out.startswith("Native apps that signed in on the Webapp's listener were signed out, but")
+    assert "browsers stay signed in" in out and str(world["root"] / TOKEN_PATH) in out
+    assert "Nobody was signed out" not in out
+
+
 def test_signing_out_with_no_gateway_and_a_credential_that_cannot_be_stored_says_nobody_was(world, capsys):
     """With no gateway running, sign-out replaces the stored credential itself. When the home cannot
     store one (a stray file where its folder goes, a folder another user owns), it says nobody was
