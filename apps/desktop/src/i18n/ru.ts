@@ -2072,6 +2072,7 @@ export const ruOverrides = {
     failedExport: 'Не удалось экспортировать профиль',
     allProfiles: 'Все профили',
     showAllProfiles: 'Показать все профили',
+    notServedHere: 'Здесь не обслуживается',
     switchToProfile: name => `Переключиться на ${name}`,
     switchToConnection: name => `Переключиться на ${name}`,
     switchConnectionFailed: name => `Не удалось подключиться к ${name}`,

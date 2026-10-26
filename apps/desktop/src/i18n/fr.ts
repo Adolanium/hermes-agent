@@ -3211,6 +3211,7 @@ export const frOverrides = {
     failedExport: "Échec de l'exportation du profil",
     allProfiles: 'Tous les profils',
     showAllProfiles: 'Afficher tous les profils',
+    notServedHere: 'Non proposé ici',
     switchToProfile: name => `Basculer vers ${name}`,
     switchToConnection: name => `Basculer vers ${name}`,
     switchConnectionFailed: name => `Impossible de se connecter à ${name}`,

@@ -3206,6 +3206,7 @@ export const deOverrides = {
     failedExport: 'Profil konnte nicht exportiert werden',
     allProfiles: 'Alle Profile',
     showAllProfiles: 'Alle Profile anzeigen',
+    notServedHere: 'Hier nicht bereitgestellt',
     switchToProfile: name => `Zu ${name} wechseln`,
     switchToConnection: name => `Zu ${name} wechseln`,
     switchConnectionFailed: name => `Keine Verbindung zu ${name} möglich`,
