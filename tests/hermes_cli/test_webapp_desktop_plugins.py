@@ -112,6 +112,26 @@ def test_a_linked_plugin_folder_loads_like_native_desktop(webapp, hermes_root, t
     assert webapp.get("/api/desktop-plugins/read", params={"path": str(link / "notes.txt")}).status_code == 404
 
 
+def test_an_edited_plugin_entry_gets_a_new_stamp_under_the_path_the_loader_watches(webapp, hermes_root):
+    # The browser has no file watcher: it polls these stamps to hot-reload an edited plugin.js.
+    folder = _install(hermes_root, "notes", "export default { id: 'notes' }")
+    (folder.parent / "half-copied").mkdir()
+    root = webapp.get("/api/desktop-plugins/root").json()["root"]
+    folders = webapp.get("/api/desktop-plugins/list", params={"path": root}).json()["entries"]
+    notes = next(e["path"] for e in folders if e["name"] == "notes")
+    (entry,) = [e["path"] for e in webapp.get("/api/desktop-plugins/list", params={"path": notes}).json()["entries"]]
+
+    before = webapp.get("/api/desktop-plugins/stamps").json()["stamps"]
+    assert list(before) == [entry]
+
+    (folder / "plugin.js").write_text("export default { id: 'notes', v: 2 }", encoding="utf-8")
+    after = webapp.get("/api/desktop-plugins/stamps").json()["stamps"]
+    assert after[entry] != before[entry]
+
+    (folder / "plugin.js").unlink()
+    assert webapp.get("/api/desktop-plugins/stamps").json()["stamps"] == {}
+
+
 @pytest.mark.parametrize("surface", ["gateway", "dashboard", "serve"])
 def test_only_the_webapp_serves_desktop_plugins(monkeypatch, hermes_root, surface):
     _install(hermes_root, "notes", "export default {}")

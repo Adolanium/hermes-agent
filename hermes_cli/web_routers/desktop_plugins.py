@@ -4,8 +4,8 @@ Native Desktop reads that folder from its own disk (``desktopPluginsRoot`` in El
 ``fs-ipc.ts``). The Webapp's renderer runs in a browser whose only disk is this server, so the
 browser bridge asks here instead, and the same runtime loader scans, loads and polls it.
 
-The routes answer only what the loader reads: the root, its plugin folders, and each folder's
-``plugin.js`` and ``.hermes-package.json``. Containment is checked on the path as written, then
+The routes answer only what the loader reads: the root, its plugin folders, each folder's
+``plugin.js`` and ``.hermes-package.json``, and a change stamp per ``plugin.js`` for hot reload. Containment is checked on the path as written, then
 symlinks are followed as Electron's ``readDir`` does, so ``desktop-plugins/foo -> ~/src/foo`` loads
 here too. They never go through ``/api/fs``, which follows the profile's SSH workspace and truncates
 at the preview cap. Webapp only (``SurfacePolicy.desktop_plugins``; 404 elsewhere).
@@ -73,6 +73,22 @@ def _read(raw: str) -> dict:
     return {"byteSize": size, "path": str(target), "text": text, "truncated": False}
 
 
+def _stamps() -> dict:
+    """A change stamp for each folder's ``plugin.js``, keyed by the path ``_list`` hands out. The
+    browser has no file watcher, so it polls this one listing to hot-reload an edited entry the way
+    Electron's ``watchPreviewFile`` does. Size joins the mtime so a same-tick rewrite still shows."""
+    root = desktop_plugins_root()
+    stamps = {}
+    for folder in root.iterdir():
+        entry = folder / "plugin.js"
+        try:
+            stat = entry.stat()
+        except OSError:
+            continue
+        stamps[str(entry)] = f"{stat.st_mtime_ns}:{stat.st_size}"
+    return {"stamps": stamps}
+
+
 @router.get("/api/desktop-plugins/root")
 async def desktop_plugins_root_route() -> dict:
     return {"root": str(await asyncio.to_thread(desktop_plugins_root))}
@@ -86,3 +102,8 @@ async def list_desktop_plugins(path: str) -> dict:
 @router.get("/api/desktop-plugins/read")
 async def read_desktop_plugin_file(path: str) -> dict:
     return await asyncio.to_thread(_read, path)
+
+
+@router.get("/api/desktop-plugins/stamps")
+async def desktop_plugin_stamps() -> dict:
+    return await asyncio.to_thread(_stamps)

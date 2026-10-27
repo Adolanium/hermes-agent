@@ -80,7 +80,7 @@ export function installBrowserDesktopBridge(): boolean {
     ...createBrowserClipboardBridge({ saveBuffer: uploads.saveImageBuffer }),
     ...createBrowserConnectionBridge({ api, bootstrap }),
     ...files,
-    ...createBrowserDesktopPluginsBridge({ api, files }),
+    ...createBrowserDesktopPluginsBridge({ api, files, previews: BROWSER_BRIDGE_STUBS }),
     ...uploads,
     api,
     // This renderer is built from the serving checkout, so its version is the
