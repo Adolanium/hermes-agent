@@ -7,7 +7,7 @@ type PreviewWatchBridge = Pick<
 
 type DesktopPluginsBridge = Pick<
   Window['hermesDesktop'],
-  'desktopPluginsRoot' | 'readDir' | 'readFileText' | 'readPluginSource'
+  'desktopPluginsRoot' | 'readDir' | 'readFileText' | 'readPluginSource' | 'reconcileDesktopPlugins'
 > &
   PreviewWatchBridge
 
@@ -108,6 +108,9 @@ export function createBrowserDesktopPluginsBridge({
     readDir: path => (inside(path) ? get('list', path) : files.readDir(path)),
     readFileText: path => (inside(path) ? readFile(path) : files.readFileText(path)),
     readPluginSource: readFile,
+    // The server copies agent+desktop packages' desktop halves into the folder, as Electron does.
+    reconcileDesktopPlugins: async () =>
+      (await api<{ touched: string[] }>({ method: 'POST', path: '/api/desktop-plugins/reconcile' })).touched,
     stopPreviewFileWatch: async id => {
       if (!watches.has(id)) {
         return previews.stopPreviewFileWatch(id)
